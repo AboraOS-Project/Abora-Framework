@@ -29,6 +29,7 @@ Early development for Abora v5 — **milestone 0: foundation**.
 | System info        | Linux backend from `/proc` + `/etc/os-release`               |
 | Update model       | Channels, windows, reboot policy, provider trait (no delivery yet) |
 | Docs & packaging   | docs/, SECURITY.md, systemd unit, dev/check scripts          |
+| Nix / NixOS        | flake: packages, devShell, hardened NixOS module, overlay    |
 
 ## Security posture
 
@@ -41,6 +42,8 @@ logged. See [SECURITY.md](SECURITY.md) and [docs/security.md](docs/security.md).
 ## Quick start
 
 Requirements: Rust edition 2021 toolchain (`cargo`; rustup-managed preferred).
+On NixOS / Nix machines, prefer the flake instead (see
+[docs/nix.md](docs/nix.md)).
 
 ```sh
 # Build and test
@@ -93,8 +96,9 @@ crates/abora-api     Versioned API types + error envelope   (pure data)
 crates/abora-update  Update domain model + provider trait
 services/aborad      The daemon (axum, read-only API)
 cli/abora            Command line client (loopback only)
-config/              Shipped default configuration
-docs/                Architecture, config, API, security, update
+nix/                 Flake package derivation + NixOS module
+config/              Shipped default configuration + auth.toml.example
+docs/                Architecture, config, API, security, update, nix
 installer/           systemd unit + install notes
 scripts/             check.sh / dev.sh helpers
 ```
@@ -109,6 +113,7 @@ and runtime flow.
 * [docs/daemon-api.md](docs/daemon-api.md) — HTTP API contract
 * [docs/security.md](docs/security.md) — threat model and guarantees
 * [docs/update.md](docs/update.md) — update design (not yet delivered)
+* [docs/nix.md](docs/nix.md) — Nix / NixOS builds and the `services.aborad` module
 * [docs/roadmap.md](docs/roadmap.md) — what comes next
 * [SECURITY.md](SECURITY.md) — vulnerability reporting
 

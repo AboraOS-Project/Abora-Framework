@@ -55,4 +55,16 @@ else
     echo "warn: cargo clippy not installed; skipping lint check"
 fi
 
+# --- nix (optional) ------------------------------------------------------
+if has nix; then
+    if [[ -f flake.lock ]]; then
+        echo "==> nix flake check"
+        nix flake check
+    else
+        echo "warn: flake.lock missing; run 'nix flake lock' once (see docs/nix.md)"
+    fi
+else
+    echo "warn: nix not installed; skipping flake check"
+fi
+
 echo "All checks done."
