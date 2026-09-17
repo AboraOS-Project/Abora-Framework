@@ -37,7 +37,7 @@ pub struct RequestId(pub String);
 /// Build the full router for a daemon instance. Pass the loopback boundary
 /// explicitly so that serving and testing use the same path.
 pub fn build(state: SharedState) -> Router {
-    let base_path = state.config.api.base_path.clone();
+    let base_path = state.config.read().expect("config lock poisoned").api.base_path.clone();
 
     Router::new()
         .route(
@@ -241,22 +241,28 @@ async fn authorize(req: Request, next: Next, state: SharedState, permission: Per
 
     // Tokens are enforced only when the operator configured a store AND
     // authentication is required; otherwise the pure preview rule applies.
-    let store = if state.config.security.require_authentication {
-        state.tokens.as_ref()
-    } else {
-        None
-    };
+    // The authorization decision is computed (and the locks dropped) inside
+    // the block so the token borrow never outlives its guard.
     let bearer = req
         .headers()
         .get(AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .and_then(bearer_value);
 
-    let decision = auth::authorize(peer, permission, bearer, store);
+    let decision = {
+        let config = state.config.read().expect("config lock poisoned");
+        let tokens = state.tokens.read().expect("tokens lock poisoned");
+        let store = if config.security.require_authentication {
+            tokens.as_ref()
+        } else {
+            None
+        };
+        auth::authorize(peer, permission, bearer, store)
+    };
 
     match decision {
         Decision::Allowed => {
-            if state.config.logging.level >= abora_log::Level::Debug {
+            if state.logger.level() >= abora_log::Level::Debug {
                 let method = req.method().clone();
                 let uri = req.uri().clone();
                 let request_id = req

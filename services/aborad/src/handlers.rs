@@ -53,14 +53,17 @@ pub async fn system(State(state): State<SharedState>) -> Result<Json<SystemRespo
         ApiError::internal(format!("could not collect system information: {e}"))
     })?;
 
-    let hostname_override = state.config.system.hostname.clone();
+    let (hostname_override, description) = {
+        let config = state.config.read().expect("config lock poisoned");
+        (config.system.hostname.clone(), config.system.description.clone())
+    };
     let hostname = hostname_override
         .clone()
         .unwrap_or_else(|| info.hostname.clone());
 
     Ok(Json(SystemResponse {
         hostname,
-        description: state.config.system.description.clone(),
+        description,
         hostname_override,
         architecture: info.architecture,
         machine: info.machine,

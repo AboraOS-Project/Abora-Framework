@@ -49,11 +49,18 @@ crate may depend on.
 4. Enforce the security posture: the bind address must be a loopback
    address. A non-loopback bind is refused — remote management is not
    implemented, and the daemon will not pretend otherwise.
-5. Build the logger (level/format from config), set it global.
+5. Build the logger (level/format from config), set it global. The
+   *level* is mutable at runtime (config reload); the *format* is not.
 6. Bind the listener *before* starting the async runtime, so bind errors
    surface synchronously and the socket never accepts before being handled.
 7. Start a multi-thread tokio runtime and serve axum on
    `/api/v1`, shutting down gracefully on SIGINT/SIGTERM.
+8. A background task reloads configuration on `SIGHUP` and on file-watch
+   changes (config + token file, 2s poll): a fresh `Config` and `TokenStore`
+   are swapped in under `RwLock`s (handlers and the auth middleware read the
+   live copy), and the log threshold is updated. Invalid reloads keep the
+   previous configuration. `base_path`/`listen_addr`/log-format changes
+   require a restart and are flagged in the logs.
 
 ## HTTP API
 

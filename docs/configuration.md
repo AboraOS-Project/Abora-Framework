@@ -18,6 +18,15 @@ The human-readable summary of the *applied* configuration is printed by
 `abora config check` and logged at daemon startup, so operators can see what
 actually took effect.
 
+## Reload
+
+The daemon re-reads the configuration file without a restart on `SIGHUP` and
+on file change (config + token files are watched and polled every 2s). Most
+settings apply immediately; `[api] base_path`, `[remote] listen_addr` and
+the log `format` require a restart (the daemon warns if they changed). A
+reload that fails to parse/validate keeps the previous configuration.
+See [docs/daemon-api.md](daemon-api.md#configuration-reload).
+
 ## Validation
 
 Loading always parses *and* validates. Invalid config is rejected loudly:

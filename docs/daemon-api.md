@@ -144,6 +144,29 @@ Unknown routes (HTTP 404) return the same envelope with
 `code: "not_found"`, so every non-2xx response is consistent machine-readable
 JSON.
 
+## Configuration reload
+
+The daemon re-reads its configuration file without a restart in two ways:
+
+* **`SIGHUP`** — explicit, immediate reload.
+* **File watching** — every 2 seconds the config file (and the token file,
+  when set) are checked for modification and reloaded automatically.
+
+A reload applies immediately: the log threshold,
+`[system] hostname`/`description`, `[updates]*`, `[maintenance]`,
+`[security] require_authentication` **and** `[security] token_file` (a new
+or edited token file is picked up; a broken one keeps the previous store so
+the daemon never locks itself out). The `abora` CLI's `auth generate-token`
+writes the token file, so a reload activates new tokens promptly.
+
+Two settings require a **restart** and are only warned about if changed:
+`[api] base_path` (the router is built at startup) and
+`[remote] listen_addr` (the socket is bound at startup), plus the log
+`format`. A failed reload (unparseable file, invalid values) never stops the
+daemon — the previous configuration keeps serving and the error is logged.
+With compiled-in defaults (no config file) there is nothing to reload;
+`SIGHUP` logs that fact.
+
 ## Implementation notes
 
 * Axum handler functions; authorization lives in a per-route middleware

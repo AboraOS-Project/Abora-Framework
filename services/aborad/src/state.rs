@@ -1,6 +1,11 @@
 //! Shared state held by the daemon across requests.
+//!
+//! `config` and `tokens` are behind [`std::sync::RwLock`] so the config
+//! reload path (SIGHUP / file watching) can swap in a fresh configuration
+//! and token store without replacing the whole [`AppState`] (which requests
+//! and the server task hold concurrently).
 
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
 use abora_config::Config;
@@ -10,10 +15,11 @@ use crate::tokens::TokenStore;
 
 /// Process-wide state passed to every handler via axum's `State`.
 pub struct AppState {
-    pub config: Config,
+    pub config: RwLock<Config>,
     pub logger: Logger,
     /// Loaded bearer-token store, when `[security] token_file` is set.
-    pub tokens: Option<TokenStore>,
+    /// Replaced wholesale on reload.
+    pub tokens: RwLock<Option<TokenStore>>,
     pub started_at: Instant,
     /// RFC 3339 timestamp captured at startup (stable across requests).
     pub started_at_rfc3339: String,
@@ -25,9 +31,9 @@ impl AppState {
     pub fn new(config: Config, logger: Logger, tokens: Option<TokenStore>) -> Arc<Self> {
         Arc::new(Self {
             started_at_rfc3339: abora_log::rfc3339_now(),
-            config,
+            config: RwLock::new(config),
             logger,
-            tokens,
+            tokens: RwLock::new(tokens),
             started_at: Instant::now(),
         })
     }

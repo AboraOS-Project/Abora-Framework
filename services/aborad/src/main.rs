@@ -11,19 +11,22 @@
 //! Run `aborad --help` for usage.
 
 use std::net::{SocketAddr, TcpListener};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::time::{Duration, SystemTime};
 
 use abora_config::{Config, ConfigError};
 use abora_core::{API_VERSION, DAEMON_NAME, DEFAULT_CONFIG_PATH, FRAMEWORK_NAME, FRAMEWORK_VERSION};
 use abora_log::{info, warn, Logger};
 
-use crate::state::AppState;
+use crate::reload::ReloadSource;
+use crate::state::{AppState, SharedState};
 use crate::tokens::TokenStore;
 
 mod auth;
 mod errors;
 mod handlers;
+mod reload;
 mod server;
 mod state;
 mod tokens;
@@ -182,6 +185,18 @@ fn check_bind_addr(config: &Config) -> Result<SocketAddr, String> {
     Ok(addr)
 }
 
+/// How often the background task checks watched files for changes.
+const WATCH_POLL_INTERVAL: Duration = Duration::from_secs(2);
+
+/// `(mtime, length)` of a watched file — enough to detect edits.
+type FileFingerprint = Option<(SystemTime, u64)>;
+
+fn fingerprint(path: &Path) -> FileFingerprint {
+    std::fs::metadata(path)
+        .ok()
+        .and_then(|m| m.modified().ok().map(|t| (t, m.len())))
+}
+
 fn run(config_path: Option<PathBuf>) -> Result<(), String> {
     // Bootstrap a minimal logger for the config-resolution phase; the real
     // logger is configured below from the loaded config.
@@ -205,6 +220,12 @@ fn run(config_path: Option<PathBuf>) -> Result<(), String> {
         // Only one logger can be global per process; not fatal for the daemon.
         let _ = first;
     }
+
+    let reload_source = match &loaded.source {
+        ConfigSource::Explicit(p) => ReloadSource::File(p.clone()),
+        ConfigSource::Environment(p) => ReloadSource::File(p.clone()),
+        ConfigSource::BuiltinDefaults => ReloadSource::Builtin,
+    };
 
     info!(logger, "starting {DAEMON_NAME} {FRAMEWORK_VERSION} (api {API_VERSION})");
     match &loaded.source {
@@ -240,7 +261,7 @@ fn run(config_path: Option<PathBuf>) -> Result<(), String> {
     info!(logger, "listening on {bind_addr} (loopback only)");
 
     let state = AppState::new(config, logger, tokens);
-    let app = server::build(state);
+    let app = server::build(state.clone());
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -248,38 +269,90 @@ fn run(config_path: Option<PathBuf>) -> Result<(), String> {
         .map_err(|e| format!("could not start async runtime: {e}"))?;
 
     runtime.block_on(async {
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+        tokio::spawn(signal_and_watch_loop(state.clone(), reload_source, shutdown_tx));
+
         let listener = tokio::net::TcpListener::from_std(listener)
             .map_err(|e| format!("could not register listener with async runtime: {e}"))?;
         axum::serve(
             listener,
             app.into_make_service_with_connect_info::<SocketAddr>(),
         )
-        .with_graceful_shutdown(shutdown_signal())
+        .with_graceful_shutdown(async {
+            let _ = shutdown_rx.await;
+        })
         .await
         .map_err(|e| format!("server error: {e}"))
     })
 }
 
-async fn shutdown_signal() {
-    let ctrl_c = async {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("failed to install Ctrl+C handler");
-    };
+/// Runs for the lifetime of the daemon: reloads configuration on `SIGHUP`
+/// (and when watched files change on disk) and triggers a graceful shutdown
+/// on `SIGTERM`/`SIGINT`.
+async fn signal_and_watch_loop(state: SharedState, source: ReloadSource, shutdown: tokio::sync::oneshot::Sender<()>) {
+    // Seed with the current fingerprint so the first tick is not a "change".
+    let mut config_seen = source.file_path().and_then(fingerprint);
+    let mut token_seen = fingerprint_of_token(state.as_ref());
 
-    #[cfg(unix)]
-    let terminate = async {
-        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("failed to install SIGTERM handler")
-            .recv()
-            .await;
-    };
+    let mut watch = tokio::time::interval(WATCH_POLL_INTERVAL);
+    watch.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
-    #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
+    loop {
+        // Resolves exactly once per `SIGTERM` (graceful shutdown).
+        let terminate = async {
+            #[cfg(unix)]
+            {
+                use tokio::signal::unix::{signal, SignalKind};
+                let mut sig = signal(SignalKind::terminate()).ok();
+                loop {
+                    if let Some(s) = sig.as_mut() {
+                        if s.recv().await.is_some() {
+                            break;
+                        }
+                    }
+                }
+            }
+            #[cfg(not(unix))]
+            std::future::pending::<()>().await;
+        };
 
-    tokio::select! {
-        _ = ctrl_c => {},
-        _ = terminate => {},
+        // Resolves once per `SIGHUP`, then keeps the branch parked.
+        let hangup = async {
+            #[cfg(unix)]
+            {
+                use tokio::signal::unix::{signal, SignalKind};
+                let mut sig = signal(SignalKind::hangup()).ok();
+                if let Some(s) = sig.as_mut() {
+                    let _ = s.recv().await;
+                }
+            }
+            std::future::pending::<()>().await;
+        };
+
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => break,
+            _ = terminate => break,
+            _ = hangup => reload::reload(&state, &source),
+            _ = watch.tick() => {
+                let config_now = source.file_path().and_then(fingerprint);
+                let token_now = fingerprint_of_token(state.as_ref());
+                let config_changed = config_now != config_seen;
+                let token_changed = token_now != token_seen;
+                if config_changed || token_changed {
+                    reload::reload(&state, &source);
+                }
+                // Re-seed regardless; a temporary read failure settles
+                // back naturally on the next change.
+                config_seen = config_now.or(config_seen);
+                token_seen = token_now.or(token_seen);
+            }
+        }
     }
+
+    let _ = shutdown.send(());
+}
+
+fn fingerprint_of_token(state: &AppState) -> FileFingerprint {
+    let config = state.config.read().expect("config lock poisoned");
+    config.security.token_file.as_deref().and_then(fingerprint)
 }

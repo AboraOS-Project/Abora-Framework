@@ -25,6 +25,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::io::Write;
 use std::str::FromStr;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -81,6 +82,25 @@ impl FromStr for Level {
     }
 }
 
+impl Level {
+    /// Rank used for the reloadable atomic threshold (declaration order).
+    fn as_rank(self) -> u8 {
+        self as u8
+    }
+
+    /// Inverse of [`Level::as_rank`].
+    fn from_rank(rank: u8) -> Level {
+        match rank {
+            0 => Level::Off,
+            1 => Level::Error,
+            2 => Level::Warn,
+            3 => Level::Info,
+            4 => Level::Debug,
+            _ => Level::Trace,
+        }
+    }
+}
+
 /// Record output encoding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -130,7 +150,9 @@ impl<T> serde::Serialize for Redacted<T> {
 }
 
 struct LoggerInner {
-    level: Level,
+    // Atomic so SIGHUP config reload can lower/raise the threshold on a
+    // fully-cloned, shared logger without synchronization trouble.
+    level: AtomicU8,
     format: Format,
     writer: Mutex<Box<dyn Write + Send>>,
 }
@@ -152,12 +174,20 @@ impl Logger {
 
     /// The configured threshold.
     pub fn level(&self) -> Level {
-        self.0.level
+        Level::from_rank(self.0.level.load(Ordering::Relaxed))
+    }
+
+    /// Reconfigure the threshold at runtime (config reload).
+    pub fn set_level(&self, level: Level) {
+        self.0.level.store(level.as_rank(), Ordering::Relaxed);
     }
 
     /// Whether a record at `level` would be emitted.
     pub fn enabled(&self, level: Level) -> bool {
-        self.0.level != Level::Off && level != Level::Off && level <= self.0.level
+        let threshold = self.0.level.load(Ordering::Relaxed);
+        threshold != Level::Off.as_rank()
+            && level != Level::Off
+            && level.as_rank() <= threshold
     }
 
     /// Start a record at `level`, then add fields and `.emit(...)` a message.
@@ -326,7 +356,7 @@ impl LoggerBuilder {
             .writer
             .unwrap_or_else(|| Box::new(std::io::stderr()));
         Logger(Arc::new(LoggerInner {
-            level: self.level,
+            level: AtomicU8::new(self.level.as_rank()),
             format: self.format,
             writer: Mutex::new(boxed),
         }))
@@ -494,12 +524,28 @@ mod tests {
         }
     }
 
-    #[test]
+#[test]
     fn off_level_emits_nothing() {
         let out = capture(Level::Off, Format::Text, |l| {
-            l.error("quiet");
+            l.error("nope");
         });
         assert!(out.is_empty());
+    }
+
+    #[test]
+    fn set_level_reconfigures_a_shared_logger() {
+        let out = capture(Level::Info, Format::Text, |l| {
+            assert_eq!(l.level(), Level::Info);
+            l.info("before");
+            l.set_level(Level::Debug);
+            assert_eq!(l.level(), Level::Debug);
+            l.debug("after");
+            l.set_level(Level::Off);
+            l.error("silenced");
+        });
+        assert!(out.contains("before"), "got: {out}");
+        assert!(out.contains("after"), "got: {out}");
+        assert!(!out.contains("silenced"), "got: {out}");
     }
 
     #[test]

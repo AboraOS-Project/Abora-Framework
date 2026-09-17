@@ -10,7 +10,7 @@ sysinfo, API skeleton, read-only daemon, CLI, docs).
 - [x] Service registry: discover and report systemd units via `GET /api/v1/services`.
 - [ ] Filters/pagination for the service registry and per-service detail (`systemctl show`).
 - [x] Request IDs (`request_id` in error envelope + `X-Request-ID` correlation).
-- [ ] Config reload (SIGHUP) and config file watching.
+- [x] Config reload (SIGHUP) and config file watching.
 - [ ] Structured panic/log-of-record wiring (already partially in place).
 - [ ] CI pipeline: fmt + clippy + test on push; `ABORA_BUILD_COMMIT` stamped builds.
 

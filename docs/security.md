@@ -48,6 +48,11 @@ request (loopback included) must carry `Authorization: Bearer <secret>`.
   as does a token file that exists but contains no tokens — that would
   otherwise brick the API with `401`s accidentally.
 
+Adding/revoking tokens takes effect via `SIGHUP` or within ~2s (file watch):
+new tokens are picked up without a restart. If the token file is invalid at
+reload time the previous token store is kept, so the daemon never loses its
+own credentials over a partially-written file.
+
 ### Generating tokens
 
 ```sh
