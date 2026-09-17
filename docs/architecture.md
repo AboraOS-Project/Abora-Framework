@@ -1,0 +1,100 @@
+# Architecture
+
+This document describes how the Abora Framework is organised and how its
+parts fit together.
+
+## Goals
+
+* One shared foundation for Abora Cloud and Abora Atlas.
+* Secure by default: loopback-only, authenticated, read-only for now.
+* No arbitrary remote command execution, ever.
+* Versioned, additive API that both platforms build on.
+* Structured, journald-friendly logging.
+* First-class, tested configuration.
+
+## Workspace layout
+
+Cargo workspace with library and binary crates:
+
+```
+crates/
+  abora-core     Shared constants and the `Version` type. No platform code.
+  abora-config   Strongly-typed TOML configuration + validation + extensions.
+  abora-log      Structured logging (JSON/text) to stderr, lazy records.
+  abora-sysinfo  Read-only system information (Linux, /proc + os-release).
+  abora-api      Versioned API data types + error envelope. No HTTP dependency.
+  abora-update   Update domain model (channels, windows, policy) + provider trait.
+services/
+  aborad         The framework daemon: HTTP API over the above crates.
+cli/
+  abora          The command line client (talks to the loopback daemon only).
+config/          Shipped default configuration file.
+docs/            This documentation set.
+scripts/         Developer / CI helpers.
+installer/       Packaging (systemd unit) and install documentation.
+```
+
+Dependency direction is outward: `aborad` (or a platform) depends on the
+crates; crates never depend on `aborad`. `abora-core` is the leaf every
+crate may depend on.
+
+## Runtime flow (`aborad`)
+
+1. Parse CLI args: `--config`, `--version`, `--help`.
+2. Resolve configuration:
+   `--config` flag → `$ABORA_CONFIG` → `/etc/abora/abora.toml` → compiled-in
+   defaults. The source is logged.
+3. Validate the configuration; refuse to start on invalid values.
+4. Enforce the security posture: the bind address must be a loopback
+   address. A non-loopback bind is refused — remote management is not
+   implemented, and the daemon will not pretend otherwise.
+5. Build the logger (level/format from config), set it global.
+6. Bind the listener *before* starting the async runtime, so bind errors
+   surface synchronously and the socket never accepts before being handled.
+7. Start a multi-thread tokio runtime and serve axum on
+   `/api/v1`, shutting down gracefully on SIGINT/SIGTERM.
+
+## HTTP API
+
+See [docs/daemon-api.md](daemon-api.md) for the full reference.
+
+* Path prefix `/api/v1` (configurable via `[api] base_path`).
+* Read-only endpoints: `health`, `version`, `system`, `services`.
+* `updates` intentionally returns `501 Not Implemented` — the model exists
+  (`abora-update`) but the machinery does not, and we won't fake it.
+* Every route is guarded by a per-operation permission enforced in a
+  middleware layer. Today only loopback clients are admitted.
+
+## Authorization model
+
+`crates/…/aborad/src/auth.rs` defines a small `Permission` enum and a pure
+`decision()` function: peer address + config → allow/deny. Handlers never
+check authorization themselves; the server middleware does, per route.
+Keeping the decision pure makes it directly unit-testable.
+
+## Configuration model
+
+`abora-config` owns the framework sections (`system`, `updates`,
+`maintenance`, `remote`, `security`, `logging`, `api`, `features`). Unknown
+keys inside these sections are rejected (`deny_unknown_fields`), while
+*unknown top-level sections* are preserved verbatim under
+`Config::extension` so Abora Cloud / Atlas can hang their own `[cloud.*]` /
+`[atlas.*]` tables off the same file. See [docs/configuration.md](configuration.md).
+
+## Logging
+
+`abora-log` writes one structured record per line to stderr, which systemd
+captures into journald. JSON is the default format. Sensitive values are
+wrapped in `Redacted<T>`, which always serializes as `<redacted>`. See
+[docs/configuration.md](configuration.md#logging).
+
+## Security
+
+Threat model and guarantees are in [docs/security.md](security.md) and the
+root [`SECURITY.md`](../SECURITY.md).
+
+## Update infrastructure
+
+The domain model (channels, maintenance windows, reboot policy, status,
+history, provider trait) lives in `abora-update`. Delivery mechanics are
+not implemented yet; see [docs/update.md](update.md).

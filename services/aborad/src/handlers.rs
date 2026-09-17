@@ -1,0 +1,93 @@
+//! HTTP handlers for `aborad`. Each handler is small, read-only, and
+//! declares its required [`Permission`] in [`super::server`].
+
+use axum::extract::State;
+use axum::Json;
+
+use abora_api::{
+    ApiErrorBody, ApiVersionInfo, DaemonInfo, ErrorCode, HealthResponse, HealthStatus,
+    ServiceStatus, SystemResponse, VersionResponse,
+};
+use abora_core::{DAEMON_NAME, FRAMEWORK_NAME, Version};
+
+use crate::errors::ApiError;
+use crate::state::SharedState;
+
+/// `GET /api/v1/health`
+pub async fn health(State(state): State<SharedState>) -> Json<HealthResponse> {
+    Json(HealthResponse {
+        status: HealthStatus::Ok,
+        daemon: DaemonInfo {
+            name: DAEMON_NAME.to_owned(),
+            version: Version::current(),
+        },
+        api: ApiVersionInfo::current(),
+        uptime_seconds: state.uptime_seconds(),
+        started_at: state.started_at_rfc3339.clone(),
+        // Components register as subsystems are implemented; empty today is
+        // honest, not a lie.
+        components: Vec::new(),
+    })
+}
+
+/// `GET /api/v1/version`
+pub async fn version() -> Json<VersionResponse> {
+    Json(VersionResponse {
+        framework_name: FRAMEWORK_NAME.to_owned(),
+        framework_version: Version::current(),
+        daemon: DaemonInfo {
+            name: DAEMON_NAME.to_owned(),
+            version: Version::current(),
+        },
+        api: ApiVersionInfo::current(),
+        git_commit: option_env!("ABORA_BUILD_COMMIT").map(str::to_owned),
+    })
+}
+
+/// `GET /api/v1/system`
+pub async fn system(State(state): State<SharedState>) -> Result<Json<SystemResponse>, ApiError> {
+    let info = abora_sysinfo::SystemInfo::collect().map_err(|e| {
+        state
+            .logger
+            .error(format!("system info collection failed: {e}"));
+        ApiError::internal(format!("could not collect system information: {e}"))
+    })?;
+
+    let hostname_override = state.config.system.hostname.clone();
+    let hostname = hostname_override
+        .clone()
+        .unwrap_or_else(|| info.hostname.clone());
+
+    Ok(Json(SystemResponse {
+        hostname,
+        description: state.config.system.description.clone(),
+        hostname_override,
+        architecture: info.architecture,
+        machine: info.machine,
+        uptime_seconds: info.uptime.as_secs(),
+        os: info.os,
+        kernel: info.kernel,
+        memory: info.memory,
+        cpu: info.cpu,
+        framework_version: Version::current(),
+    }))
+}
+
+/// `GET /api/v1/services`
+///
+/// Read-only list of managed services. No service registry exists yet, so
+/// this returns an empty list rather than faking data.
+pub async fn services() -> Json<Vec<ServiceStatus>> {
+    Json(Vec::new())
+}
+
+/// `GET /api/v1/updates`
+///
+/// Update infrastructure is designed (see `crates/abora-update`) but not
+/// implemented. Return `501` honestly instead of inventing status.
+pub async fn updates() -> ApiError {
+    ApiError(ApiErrorBody::new(
+        ErrorCode::NotImplemented,
+        "the update system is planned but not implemented in this milestone; see docs/update.md",
+    ))
+}

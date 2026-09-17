@@ -1,5 +1,16 @@
+# Rust build output
+target/
+**/*.rs.bk
+
+# Build / packaging artifacts
 build/
 dist/
 .cache/
 *.log
 .env
+
+# Editor / OS cruft
+.idea/
+.vscode/
+*.swp
+.DS_Store

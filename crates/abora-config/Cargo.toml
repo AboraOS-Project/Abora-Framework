@@ -1,0 +1,22 @@
+[package]
+name = "abora-config"
+description = "Strongly typed, extensible configuration for Abora Framework"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+abora-core = { path = "../abora-core" }
+abora-log = { path = "../abora-log" }
+abora-update = { path = "../abora-update" }
+serde = { workspace = true }
+thiserror = { workspace = true }
+toml = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

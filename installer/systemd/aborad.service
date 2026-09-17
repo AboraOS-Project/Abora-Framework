@@ -1,0 +1,38 @@
+[Unit]
+Description=Abora Framework daemon
+Documentation=https://github.com/AboraOS-Project/Abora-Framework
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/aborad
+Restart=on-failure
+RestartSec=2
+RuntimeDirectory=abora
+RuntimeDirectoryMode=0750
+StateDirectory=abora
+# The daemon is unprivileged and rootless in operation; binding 7360+t is fine.
+User=aborad
+Group=aborad
+AmbientCapabilities=
+CapabilityBoundingSet=
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/etc/abora
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+# Structured logs to stderr -> journald.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

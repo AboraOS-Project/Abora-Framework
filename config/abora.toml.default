@@ -1,0 +1,108 @@
+# Abora Framework default configuration.
+#
+# This file mirrors the compiled-in defaults exactly (verified by
+# `crates/abora-config/tests/default_file.rs`). Copy it to /etc/abora/abora.toml
+# and edit as needed. Full reference: docs/configuration.md.
+#
+# Framework owns the sections below. Abora Cloud and Abora Atlas may add
+# their OWN top-level sections (e.g. [cloud.*], [atlas.*]) which are
+# preserved untouched and never rejected. Unknown keys inside the framework
+# sections below are rejected on purpose so typos fail loudly.
+
+# ---------------------------------------------------------------------------
+# [system] — identity
+# ---------------------------------------------------------------------------
+[system]
+# Optional hostname override. Omit (default) to use the OS hostname.
+# hostname = "my-server"
+# Free-form description surfaced by GET /api/v1/system.
+# description = "Abora Cloud node"
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# [updates] — automatic update behaviour (abstraction only, see docs/update.md)
+# ---------------------------------------------------------------------------
+[updates]
+# Update channel: "stable", "beta", "nightly", or { custom = "name" }.
+channel = "stable"
+# Install available updates automatically (inside maintenance windows).
+automatic = true
+# How often to poll for updates: <n>s|m|h|d, e.g. "30m", "6h", "1d".
+check_interval = "6h"
+# Reboot outside a maintenance window: "ask", "always", "never".
+reboot_policy = "ask"
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# [maintenance] — scheduled windows for automatic update/reboot work
+# ---------------------------------------------------------------------------
+[maintenance]
+# Enable enforcement of maintenance windows.
+enabled = true
+# Windows are local-time, half-open [start, end), HH:MM. Days: monday..sunday.
+# windows = [
+#   { days = ["saturday", "sunday"], start = "02:00", end = "04:00", max_duration_minutes = 90 },
+# ]
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# [remote] — remote management (NOT implemented in this milestone)
+# ---------------------------------------------------------------------------
+[remote]
+# Reserved. The daemon ignores this and refuses to bind a non-loopback
+# address until real (authenticated) remote management exists.
+enabled = false
+# Socket the daemon binds. Loopback only, for now.
+listen_addr = "127.0.0.1:7360"
+# Optional FQDN advertised by the API for discovery.
+# advertise_hostname = "server1.internal"
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# [security]
+# ---------------------------------------------------------------------------
+[security]
+# Require authentication for every API operation. Until token auth is
+# implemented, loopback connections are treated as trusted and remote
+# connections are refused. Keep this true.
+require_authentication = true
+# Allow loopback clients to be treated as trusted during the pre-token-auth
+# milestone. Set false once token authentication is implemented.
+allow_loopback_unauthenticated = true
+# Path to the future token/auth-key store. Not used yet.
+# token_file = "/etc/abora/auth.toml"
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# [logging] — structured logging (stderr; captured by systemd/journald)
+# ---------------------------------------------------------------------------
+[logging]
+# Threshold: off, error, warn, info, debug, trace.
+level = "info"
+# Encoding: "json" (one object per line) or "text".
+format = "json"
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# [api] — runtime limits for the daemon HTTP API
+# ---------------------------------------------------------------------------
+[api]
+# Path prefix for the current API version.
+base_path = "/api/v1"
+# Maximum accepted request body size in bytes.
+max_payload_bytes = 1048576
+# Per-request timeout in seconds.
+request_timeout_secs = 30
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# [features] — dynamic feature flags (any key/value)
+# ---------------------------------------------------------------------------
+# [features]
+# experimental_thing = false
+
+# ---------------------------------------------------------------------------
+# Extension example (belongs to Abora Cloud, not Framework):
+# [cloud.telemetry]
+# enabled = true
+# ---------------------------------------------------------------------------

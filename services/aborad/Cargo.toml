@@ -1,0 +1,27 @@
+[package]
+name = "aborad"
+description = "Abora Framework system daemon"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+abora-api = { path = "../../crates/abora-api" }
+abora-config = { path = "../../crates/abora-config" }
+abora-core = { path = "../../crates/abora-core" }
+abora-log = { path = "../../crates/abora-log" }
+abora-sysinfo = { path = "../../crates/abora-sysinfo" }
+axum = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tower = { workspace = true }
+
+[dev-dependencies]
+http-body-util = { workspace = true }
+tower = { workspace = true }
+
+[lints]
+workspace = true

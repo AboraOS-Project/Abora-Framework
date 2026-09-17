@@ -1,0 +1,18 @@
+[package]
+name = "abora-api"
+description = "Versioned API definitions shared by aborad, Cloud and Atlas"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+abora-core = { path = "../abora-core" }
+abora-sysinfo = { path = "../abora-sysinfo" }
+abora-update = { path = "../abora-update" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
