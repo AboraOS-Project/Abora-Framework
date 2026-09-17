@@ -57,6 +57,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "abora-services"
+version = "0.1.0"
+dependencies = [
+ "abora-api",
+ "thiserror",
+]
+
+[[package]]
 name = "abora-sysinfo"
 version = "0.1.0"
 dependencies = [
@@ -83,6 +91,7 @@ dependencies = [
  "abora-config",
  "abora-core",
  "abora-log",
+ "abora-services",
  "abora-sysinfo",
  "axum",
  "http-body-util",

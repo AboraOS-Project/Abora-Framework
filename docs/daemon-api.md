@@ -18,7 +18,7 @@ machine-readable reference: [`crates/abora-api`](../crates/abora-api/src/lib.rs)
 | GET    | `/api/v1/health`      | implemented     |
 | GET    | `/api/v1/version`     | implemented     |
 | GET    | `/api/v1/system`      | implemented     |
-| GET    | `/api/v1/services`    | read-only, empty |
+| GET    | `/api/v1/services`    | implemented (systemd) |
 | GET    | `/api/v1/updates`     | `501` planned   |
 
 All endpoints require loopback source addresses today (see
@@ -81,13 +81,31 @@ are omitted (not `null`) when unknown.
 
 ## `GET /api/v1/services`
 
-Read-only list of managed services.
+Read-only list of managed services, discovered through the local init
+manager — systemd on Linux (`systemctl`, a fixed, read-only command set; no
+user input ever reaches the shell). Sorted by unit name.
 
 ```json
-[]
+[
+  { "name": "acpid.service", "state": "stopped", "enabled": false,
+    "description": "ACPI event daemon" },
+  { "name": "accounts-daemon.service", "state": "running", "enabled": true,
+    "description": "Accounts Service" },
+  { "name": "dbus.service", "state": "running",
+    "description": "D-Bus System Message Bus" }
+]
 ```
 
-A service registry does not exist yet, so the list is honestly empty.
+* `state`: `running`, `stopped`, `failed`, `activating`, `deactivating`,
+  `unknown` (mapped from systemd's `ActiveState`).
+* `enabled`: `true` for `enabled`/`enabled-runtime`, `false` for
+  `disabled`/`masked`, `null` (omitted) for `static`/`indirect`/generated
+  units that are pulled in by dependencies rather than enabled directly.
+* `description`: the unit's Description, omitted when absent.
+
+On a host without a compatible init manager the endpoint returns
+**`503 ServiceUnavailable`** (with `code: "service_unavailable"`) rather
+than an empty list that would imply success.
 
 ## `GET /api/v1/updates`
 

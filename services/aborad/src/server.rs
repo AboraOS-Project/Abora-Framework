@@ -182,6 +182,16 @@ mod tests {
         request_with_peer_and_token(uri, IpAddr::V4(Ipv4Addr::LOCALHOST), Some(token))
     }
 
+    /// True when `systemctl` is runnable from the test environment (i.e. not
+    /// a Nix-build sandbox). Used to branch assertions on `/api/v1/services`.
+    fn systemctl_available() -> bool {
+        std::process::Command::new("systemctl")
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+
     fn token_store(secret: &str, permissions: &[&str]) -> TokenStore {
         let perms = permissions
             .iter()
@@ -238,13 +248,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn services_is_read_only_and_empty() {
+    async fn services_lists_systemd_units_else_503() {
         let app = test_app(Config::default());
         let resp = app.oneshot(loopback_request("/api/v1/services")).await.unwrap();
-        assert_eq!(resp.status(), 200);
+        let status = resp.status();
         let bytes = resp.into_body().collect().await.unwrap().to_bytes();
-        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(v, serde_json::json!([]));
+        if systemctl_available() {
+            assert_eq!(status, 200);
+            let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            let list = v.as_array().expect("services must be an array");
+            assert!(!list.is_empty(), "a systemd host should have services");
+            for entry in list {
+                assert!(entry["name"].as_str().unwrap().ends_with(".service"));
+                assert!(entry["state"].is_string());
+            }
+        } else {
+            // Sandboxes (e.g. Nix build) have no systemd: 503, not fake data.
+            assert_eq!(status, 503);
+        }
     }
 
     #[tokio::test]
@@ -361,7 +382,14 @@ mod tests {
                 .oneshot(loopback_request_with_token(path, "admin"))
                 .await
                 .unwrap();
-            assert_eq!(resp.status(), 200, "path: {path}");
+            let status = resp.status();
+            if path == "/api/v1/services" && !systemctl_available() {
+                // Auth is enforced regardless of backend availability.
+                assert_ne!(status, 401, "path: {path}");
+                assert_eq!(status, 503, "path: {path}");
+            } else {
+                assert_eq!(status, 200, "path: {path}");
+            }
         }
     }
 }

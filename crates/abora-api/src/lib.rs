@@ -20,7 +20,7 @@
 //! | GET    | `/api/v1/health`      | implemented         |
 //! | GET    | `/api/v1/version`     | implemented         |
 //! | GET    | `/api/v1/system`      | implemented         |
-//! | GET    | `/api/v1/services`    | read-only, empty    |
+//! | GET    | `/api/v1/services`    | implemented (systemd) |
 //! | GET    | `/api/v1/updates`     | `501` planned       |
 //!
 //! See `docs/daemon-api.md` for the full contract.

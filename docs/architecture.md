@@ -24,6 +24,7 @@ crates/
   abora-sysinfo  Read-only system information (Linux, /proc + os-release).
   abora-api      Versioned API data types + error envelope. No HTTP dependency.
   abora-update   Update domain model (channels, windows, policy) + provider trait.
+  abora-services Read-only service registry (systemd discovery).
 services/
   aborad         The framework daemon: HTTP API over the above crates.
 cli/
@@ -64,6 +65,15 @@ See [docs/daemon-api.md](daemon-api.md) for the full reference.
   (`abora-update`) but the machinery does not, and we won't fake it.
 * Every route is guarded by a per-operation permission enforced in a
   middleware layer. Today only loopback clients are admitted.
+
+## Service registry
+
+`abora-services` isolates all knowledge of the local init manager. Its
+`ServiceCollector` trait plus a Linux systemd backend (`systemctl` with a
+fixed argument list — no user input, no injection) produce the `ServiceStatus`
+values served by `GET /api/v1/services`. Discovery is strictly read-only and
+reports `503` honestly on hosts without systemd. Swapping in another init
+manager means adding a sibling backend, not touching handlers or API types.
 
 ## Authorization model
 

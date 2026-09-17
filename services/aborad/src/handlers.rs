@@ -75,10 +75,20 @@ pub async fn system(State(state): State<SharedState>) -> Result<Json<SystemRespo
 
 /// `GET /api/v1/services`
 ///
-/// Read-only list of managed services. No service registry exists yet, so
-/// this returns an empty list rather than faking data.
-pub async fn services() -> Json<Vec<ServiceStatus>> {
-    Json(Vec::new())
+/// Read-only list of managed services, discovered through the local init
+/// manager (systemd on Linux). If discovery is unavailable (non-systemd host,
+/// sandbox, ...) this is `503` rather than an honest-looking empty list.
+pub async fn services(State(state): State<SharedState>) -> Result<Json<Vec<ServiceStatus>>, ApiError> {
+    match abora_services::collect() {
+        Ok(units) => Ok(Json(units)),
+        Err(e) => {
+            state.logger.warn(format!("service discovery failed: {e}"));
+            Err(ApiError(ApiErrorBody::new(
+                ErrorCode::ServiceUnavailable,
+                format!("could not query the service registry: {e}"),
+            )))
+        }
+    }
 }
 
 /// `GET /api/v1/updates`

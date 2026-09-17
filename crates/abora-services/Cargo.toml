@@ -1,0 +1,15 @@
+[package]
+name = "abora-services"
+description = "Read-only service registry (systemd discovery) for Abora Framework"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+abora-api = { path = "../abora-api" }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

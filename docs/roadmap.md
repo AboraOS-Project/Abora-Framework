@@ -7,7 +7,8 @@ sysinfo, API skeleton, read-only daemon, CLI, docs).
 
 - [x] Token authentication (`Authorization: Bearer`) with per-permission tokens.
 - [x] Remove `allow_loopback_unauthenticated` bridge (tokens or honest preview fallback).
-- [ ] Service registry: discover and report systemd units via `GET /api/v1/services`.
+- [x] Service registry: discover and report systemd units via `GET /api/v1/services`.
+- [ ] Filters/pagination for the service registry and per-service detail (`systemctl show`).
 - [ ] Request IDs (`request_id` in error envelope).
 - [ ] Config reload (SIGHUP) and config file watching.
 - [ ] Structured panic/log-of-record wiring (already partially in place).

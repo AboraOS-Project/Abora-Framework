@@ -12,6 +12,7 @@ abora-api = { path = "../../crates/abora-api" }
 abora-config = { path = "../../crates/abora-config" }
 abora-core = { path = "../../crates/abora-core" }
 abora-log = { path = "../../crates/abora-log" }
+abora-services = { path = "../../crates/abora-services" }
 abora-sysinfo = { path = "../../crates/abora-sysinfo" }
 axum = { workspace = true }
 serde = { workspace = true }
