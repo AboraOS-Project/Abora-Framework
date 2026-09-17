@@ -17,6 +17,7 @@ abora-config = { path = "../../crates/abora-config" }
 abora-core = { path = "../../crates/abora-core" }
 clap = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 ureq = { workspace = true }
 
 [lints]

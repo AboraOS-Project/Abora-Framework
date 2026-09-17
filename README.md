@@ -22,7 +22,8 @@ Early development for Abora v5 — **milestone 0: foundation**.
 |--------------------|--------------------------------------------------------------|
 | Workspace          | 6 library crates + 2 binaries                                |
 | `aborad` daemon    | Loopback-only, read-only API: health, version, system, services |
-| `abora` CLI        | `version`, `status`, `config check`                          |
+| Authentication     | Per-permission bearer tokens (SHA-256 hashed, constant-time)  |
+| `abora` CLI        | `version`, `status`, `config check`, `auth generate-token`   |
 | Configuration      | Strongly-typed TOML, validated, Cloud/Atlas-extensible        |
 | Logging            | Structured JSON/text to stderr (journald-friendly), redaction |
 | System info        | Linux backend from `/proc` + `/etc/os-release`               |
@@ -31,10 +32,11 @@ Early development for Abora v5 — **milestone 0: foundation**.
 
 ## Security posture
 
-Deny-by-default. Non-loopback binds are refused, remote peers get `403`,
-token authentication is the immediate next milestone, and there is **no
-arbitrary command-execution endpoint now or planned**. See
-[SECURITY.md](SECURITY.md) and [docs/security.md](docs/security.md).
+Deny-by-default. Non-loopback binds are refused; `401`/`403` bearer-token
+authentication is enforced whenever a token file is configured (hash-stored,
+constant-time compared), and there is **no arbitrary command-execution
+endpoint now or planned**. Loopback-only preview fallback is documented and
+logged. See [SECURITY.md](SECURITY.md) and [docs/security.md](docs/security.md).
 
 ## Quick start
 
@@ -58,6 +60,18 @@ cargo run -p abora -- config check config/abora.toml.default
 # Talk to it directly
 curl http://127.0.0.1:7360/api/v1/health
 ```
+
+### Enforce token authentication
+
+1. Generate a token (daemon stores only the hash):
+   ```sh
+   cargo run -p abora -- auth generate-token --name=operator --permission=read_all
+   ```
+2. Paste the printed `[[tokens]]` block into a root-owned, `0600` file and
+   point `[security] token_file` at it (template:
+   `config/auth.toml.example`).
+3. Restart `aborad`; every request now needs `Authorization: Bearer <secret>`
+   — the CLI reads it from `--token` or `$ABORA_DAEMON_TOKEN`.
 
 Install as a service (root):
 

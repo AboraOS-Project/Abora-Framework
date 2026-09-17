@@ -67,10 +67,18 @@ See [docs/daemon-api.md](daemon-api.md) for the full reference.
 
 ## Authorization model
 
-`crates/…/aborad/src/auth.rs` defines a small `Permission` enum and a pure
-`decision()` function: peer address + config → allow/deny. Handlers never
-check authorization themselves; the server middleware does, per route.
-Keeping the decision pure makes it directly unit-testable.
+`crates/…/aborad/src/auth.rs` defines a small `Permission` enum and the pure
+`authorize()` decision function: peer address + bearer token + token store →
+allow/deny. Handlers never check authorization themselves; the server
+middleware does, per route. Keeping the decision pure makes it directly
+unit-testable.
+
+Tokens live in a separate store (`src/tokens.rs`) whose file references
+SHA-256 hashes only; secrets are compared in constant time and never
+persisted in plaintext. Each token grants an explicit set of permission ids
+or the `read_all` wildcard. Non-loopback peers are refused unconditionally;
+loopback is trusted only when no token store is configured (preview). See
+[docs/security.md](security.md).
 
 ## Configuration model
 

@@ -7,6 +7,7 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use axum::extract::{ConnectInfo, Request};
+use axum::http::header::AUTHORIZATION;
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, MethodRouter};
@@ -77,7 +78,20 @@ async fn authorize(req: Request, next: Next, state: SharedState, permission: Per
         .map(|c| c.0.ip())
         .unwrap_or_else(|| IpAddr::V4(Ipv4Addr::UNSPECIFIED));
 
-    let decision = auth::decision(peer, &state.config);
+    // Tokens are enforced only when the operator configured a store AND
+    // authentication is required; otherwise the pure preview rule applies.
+    let store = if state.config.security.require_authentication {
+        state.tokens.as_ref()
+    } else {
+        None
+    };
+    let bearer = req
+        .headers()
+        .get(AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(bearer_value);
+
+    let decision = auth::authorize(peer, permission, bearer, store);
 
     match decision {
         Decision::Allowed => {
@@ -110,33 +124,75 @@ async fn authorize(req: Request, next: Next, state: SharedState, permission: Per
     }
 }
 
+/// Parse the token out of an `Authorization: Bearer <secret>` header value.
+/// The `Bearer` scheme is accepted case-insensitively (RFC 6750).
+fn bearer_value(header: &str) -> Option<&str> {
+    let (scheme, rest) = header.split_once(' ')?;
+    if !scheme.eq_ignore_ascii_case("Bearer") {
+        return None;
+    }
+    let token = rest.trim();
+    if token.is_empty() {
+        None
+    } else {
+        Some(token)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::state::AppState;
+    use crate::tokens::TokenStore;
     use abora_config::Config;
 
     pub(crate) fn test_app(config: Config) -> Router {
+        test_app_with_tokens(config, None)
+    }
+
+    pub(crate) fn test_app_with_tokens(config: Config, tokens: Option<TokenStore>) -> Router {
         use abora_log::{Format, Level};
         let logger = abora_log::Logger::builder()
             .level(Level::Off)
             .format(Format::Json)
             .writer(Box::new(std::io::sink()))
             .build();
-        build(AppState::new(config, logger))
+        build(AppState::new(config, logger, tokens))
     }
 
     fn request_with_peer(uri: &str, ip: IpAddr) -> Request {
-        let mut req = Request::builder()
-            .uri(uri)
-            .body(axum::body::Body::empty())
-            .unwrap();
+        request_with_peer_and_token(uri, ip, None)
+    }
+
+    fn request_with_peer_and_token(uri: &str, ip: IpAddr, token: Option<&str>) -> Request {
+        let mut builder = Request::builder().uri(uri);
+        if let Some(token) = token {
+            builder = builder.header(AUTHORIZATION, format!("Bearer {token}"));
+        }
+        let mut req = builder.body(axum::body::Body::empty()).unwrap();
         req.extensions_mut().insert(ConnectInfo(SocketAddr::new(ip, 0)));
         req
     }
 
     fn loopback_request(uri: &str) -> Request {
         request_with_peer(uri, IpAddr::V4(Ipv4Addr::LOCALHOST))
+    }
+
+    fn loopback_request_with_token(uri: &str, token: &str) -> Request {
+        request_with_peer_and_token(uri, IpAddr::V4(Ipv4Addr::LOCALHOST), Some(token))
+    }
+
+    fn token_store(secret: &str, permissions: &[&str]) -> TokenStore {
+        let perms = permissions
+            .iter()
+            .map(|p| format!("\"{p}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let hash = crate::tokens::sha256_hex(secret);
+        TokenStore::from_str(&format!(
+            "[[tokens]]\nname = \"test\"\npermissions = [{perms}]\nsecret_hash = \"{hash}\"\n"
+        ))
+        .unwrap()
     }
 
     use http_body_util::BodyExt;
@@ -232,5 +288,80 @@ mod tests {
 
         let resp = app.oneshot(loopback_request("/api/v2/health")).await.unwrap();
         assert_eq!(resp.status(), 200);
+    }
+
+    #[tokio::test]
+    async fn token_required_when_store_configured() {
+        let app = test_app_with_tokens(Config::default(), Some(token_store("ops", &["read:health"])));
+
+        // No header.
+        let resp = app.clone().oneshot(loopback_request("/api/v1/health")).await.unwrap();
+        assert_eq!(resp.status(), 401);
+
+        // Wrong secret.
+        let resp = app
+            .clone()
+            .oneshot(loopback_request_with_token("/api/v1/health", "wrong"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 401);
+
+        // Valid secret, missing permission for this route.
+        let resp = app
+            .clone()
+            .oneshot(loopback_request_with_token("/api/v1/system", "ops"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 403);
+
+        // Valid secret, correct permission.
+        let resp = app
+            .oneshot(loopback_request_with_token("/api/v1/health", "ops"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200);
+    }
+
+    #[tokio::test]
+    async fn remote_peer_is_refused_even_with_a_valid_token() {
+        let app = test_app_with_tokens(Config::default(), Some(token_store("ops", &["read_all"])));
+        let resp = app
+            .oneshot(request_with_peer_and_token(
+                "/api/v1/health",
+                IpAddr::V4(Ipv4Addr::new(10, 1, 2, 3)),
+                Some("ops"),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 403);
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(v["error"]["code"], "forbidden");
+    }
+
+    #[tokio::test]
+    async fn token_missing_permission_returns_error_envelope() {
+        let app = test_app_with_tokens(Config::default(), Some(token_store("ops", &["read:health"])));
+        let resp = app
+            .oneshot(loopback_request_with_token("/api/v1/system", "ops"))
+            .await
+            .unwrap();
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(v["error"]["code"], "forbidden");
+        assert!(v["error"]["message"].as_str().unwrap().contains("read:system"));
+    }
+
+    #[tokio::test]
+    async fn read_all_token_accesses_every_route() {
+        let app = test_app_with_tokens(Config::default(), Some(token_store("admin", &["read_all"])));
+        for path in ["/api/v1/health", "/api/v1/version", "/api/v1/system", "/api/v1/services"] {
+            let resp = app
+                .clone()
+                .oneshot(loopback_request_with_token(path, "admin"))
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), 200, "path: {path}");
+        }
     }
 }

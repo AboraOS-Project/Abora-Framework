@@ -22,7 +22,11 @@ machine-readable reference: [`crates/abora-api`](../crates/abora-api/src/lib.rs)
 | GET    | `/api/v1/updates`     | `501` planned   |
 
 All endpoints require loopback source addresses today (see
-[docs/security.md](security.md)).
+[docs/security.md](security.md)). When `[security] token_file` is
+configured, every request must also carry
+`Authorization: Bearer <secret>` (`401` without a valid token, `403` without
+the route's permission). With no token file configured, loopback is trusted
+(preview mode).
 
 ## `GET /api/v1/health`
 
@@ -116,3 +120,12 @@ to the conventional HTTP status.
 * `request_id` is reserved for correlation; not yet generated.
 * `[api] max_payload_bytes` and `request_timeout_secs` are enforced by the
   server skeleton (limits validated at config load).
+
+## Authentication examples
+
+With a token file configured:
+
+```sh
+curl -H "Authorization: Bearer <secret>" http://127.0.0.1:7360/api/v1/health
+ABORA_DAEMON_TOKEN=<secret> abora status
+```

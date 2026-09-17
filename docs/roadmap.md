@@ -5,7 +5,8 @@ sysinfo, API skeleton, read-only daemon, CLI, docs).
 
 ## Milestone 1 — daemon basics
 
-- [ ] Token authentication (`Authorization: Bearer`) with per-permission tokens; remove `allow_loopback_unauthenticated` bridge.
+- [x] Token authentication (`Authorization: Bearer`) with per-permission tokens.
+- [x] Remove `allow_loopback_unauthenticated` bridge (tokens or honest preview fallback).
 - [ ] Service registry: discover and report systemd units via `GET /api/v1/services`.
 - [ ] Request IDs (`request_id` in error envelope).
 - [ ] Config reload (SIGHUP) and config file watching.

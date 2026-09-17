@@ -1,0 +1,22 @@
+# Example bearer-token store for `aborad` (NOT a real config section).
+#
+# Point [security].token_file here (e.g. /etc/abora/auth.toml), keep the
+# file root-owned with mode 0600, and generate entries with:
+#
+#   abora auth generate-token --name=<name> --permission=<id>
+#
+# Permission ids: read:health, read:version, read:system, read:services,
+# read:updates, or read_all (grants every permission).
+#
+# The daemon only ever stores/compares SHA-256 hashes; the plaintext secret
+# is shown once by `generate-token` and must be kept elsewhere.
+
+[[tokens]]
+name = "operator"
+permissions = ["read_all"]
+secret_hash = "sha256:<replace-with-generated-hash>"
+
+# [[tokens]]
+# name = "health-watcher"
+# permissions = ["read:health"]
+# secret_hash = "sha256:<replace-with-generated-hash>"

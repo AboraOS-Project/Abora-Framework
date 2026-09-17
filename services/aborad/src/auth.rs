@@ -1,25 +1,25 @@
 //! Authorization model for `aborad`.
 //!
-//! # Current milestone guarantees
+//! # Rules (in order)
 //!
-//! * The daemon only ever binds a loopback address; remote management is
-//!   deliberately not implemented yet (see `docs/security.md`).
-//! * Every route declares the [`Permission`] it requires
-//!   (`src/server.rs`), so per-operation authorization checks are
-//!   structurally present even though today's only admission rule is
-//!   "loopback clients are trusted".
-//! * There is **no arbitrary command execution endpoint** anywhere.
+//! 1. **Never allow remote peers.** Remote management is not implemented;
+//!    non-loopback clients are always refused regardless of credentials.
+//! 2. **No token store configured** (`[security] token_file` unset):
+//!    loopback clients are trusted (preview mode). This is the current
+//!    out-of-the-box posture; the daemon logs a warning about it.
+//! 3. **Token store configured**: every request must present
+//!    `Authorization: Bearer <secret>`. Unknown/missing secrets are rejected
+//!    with `401`; a valid secret without the route's permission is rejected
+//!    with `403`.
 //!
-//! # Future
-//!
-//! Replace the loopback trust with token/mTLS authentication, then map each
-//! [`Permission`] to an actual authorization policy. The pure function
-//! [`decision`] is the seam where that logic lands.
+//! The pure function [`authorize`] is the single decision point, so all of
+//! this logic is unit-testable without a socket.
 
 use std::net::IpAddr;
 
 use abora_api::ApiErrorBody;
-use abora_config::Config;
+
+use crate::tokens::TokenStore;
 
 /// A single privileged capability a handler requires. Every route must
 /// declare one; none may run without it.
@@ -33,7 +33,7 @@ pub enum Permission {
 }
 
 impl Permission {
-    /// Machine-readable identifier for audit logs and future policy files.
+    /// Machine-readable identifier used by token grants and audit logs.
     pub const fn permission_id(self) -> &'static str {
         match self {
             Permission::ReadHealth => "read:health",
@@ -57,29 +57,41 @@ impl Permission {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Decision {
     Allowed,
-    /// Client is not trusted on this transport (only loopback is trusted).
+    /// Client is not on loopback; remote management is not enabled.
     RemoteNotAllowed,
-    /// Loopback client but authentication is required and there is no
-    /// credential mechanism available yet (misconfiguration for now).
+    /// Token required but missing or invalid (`401`).
     AuthenticationRequired,
+    /// Token authentic but does not grant the requested permission (`403`).
+    InsufficientPermission,
 }
 
-/// Pure admission decision. Security-critical logic lives here so it can be
-/// unit tested without a socket.
-pub fn decision(peer: IpAddr, config: &Config) -> Decision {
+/// Pure admission decision. The server passes `bearer` as parsed from the
+/// `Authorization` header and `store` only when authentication is enforced
+/// (i.e. `require_authentication` is true and a token file was loaded).
+pub fn authorize(
+    peer: IpAddr,
+    permission: Permission,
+    bearer: Option<&str>,
+    store: Option<&TokenStore>,
+) -> Decision {
     if !peer.is_loopback() {
         return Decision::RemoteNotAllowed;
     }
 
-    if config.security.require_authentication
-        && !config.security.allow_loopback_unauthenticated
-    {
-        // No credential verification exists yet. Rather than silently
-        // treating everyone as authenticated, we refuse loudly.
-        return Decision::AuthenticationRequired;
-    }
+    let Some(store) = store else {
+        // No token store: preview mode, loopback is trusted.
+        return Decision::Allowed;
+    };
 
-    Decision::Allowed
+    let Some(bearer) = bearer else {
+        return Decision::AuthenticationRequired;
+    };
+
+    match store.find(bearer) {
+        None => Decision::AuthenticationRequired,
+        Some(token) if token.grants(permission.permission_id()) => Decision::Allowed,
+        Some(_) => Decision::InsufficientPermission,
+    }
 }
 
 impl Decision {
@@ -97,7 +109,14 @@ impl Decision {
             Decision::AuthenticationRequired => Some(ApiErrorBody::new(
                 abora_api::ErrorCode::Unauthorized,
                 format!(
-                    "operation `{}` requires authentication, which is not available in this milestone; set [security].allow_loopback_unauthenticated = true to use loopback-only mode",
+                    "operation `{}` requires a valid bearer token",
+                    permission.permission_id()
+                ),
+            )),
+            Decision::InsufficientPermission => Some(ApiErrorBody::new(
+                abora_api::ErrorCode::Forbidden,
+                format!(
+                    "token is authenticated but not authorized for `{}`",
                     permission.permission_id()
                 ),
             )),
@@ -108,43 +127,101 @@ impl Decision {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tokens::TokenStore;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
-    fn cfg() -> Config {
-        Config::default()
+    const LOOPBACK: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
+    const REMOTE: IpAddr = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5));
+
+    fn store(secret: &str, permissions: &[&str]) -> TokenStore {
+        let perms = permissions
+            .iter()
+            .map(|p| format!("\"{p}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let hash = crate::tokens::sha256_hex(secret);
+        TokenStore::from_str(&format!(
+            "[[tokens]]\nname = \"test\"\npermissions = [{perms}]\nsecret_hash = \"{hash}\"\n"
+        ))
+        .unwrap()
     }
 
     #[test]
-    fn loopback_is_allowed_by_default() {
+    fn loopback_is_allowed_without_a_store() {
         assert_eq!(
-            decision(IpAddr::V4(Ipv4Addr::LOCALHOST), &cfg()),
+            authorize(LOOPBACK, Permission::ReadHealth, None, None),
             Decision::Allowed
         );
         assert_eq!(
-            decision(IpAddr::V6(Ipv6Addr::LOCALHOST), &cfg()),
+            authorize(IpAddr::V6(Ipv6Addr::LOCALHOST), Permission::ReadHealth, None, None),
             Decision::Allowed
         );
     }
 
     #[test]
-    fn remote_clients_are_refused() {
-        let peers = [
-            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5)),
-            IpAddr::V6(Ipv6Addr::from(0x2001_0db8_0000_0000_0000_0000_0000_0001_u128)),
-        ];
-        for peer in peers {
-            assert_eq!(decision(peer, &cfg()), Decision::RemoteNotAllowed);
-        }
+    fn remote_clients_are_refused_even_with_valid_tokens() {
+        let store = store("secret", &["read_all"]);
+        assert_eq!(
+            authorize(REMOTE, Permission::ReadHealth, Some("secret"), Some(&store)),
+            Decision::RemoteNotAllowed
+        );
+        assert_eq!(
+            authorize(REMOTE, Permission::ReadSystem, None, None),
+            Decision::RemoteNotAllowed
+        );
     }
 
     #[test]
-    fn loopback_with_hard_auth_requires_credential_mechanism() {
-        let mut c = cfg();
-        c.security.allow_loopback_unauthenticated = false;
+    fn missing_header_is_401_when_a_store_exists() {
+        let store = store("secret", &["read_all"]);
         assert_eq!(
-            decision(IpAddr::V4(Ipv4Addr::LOCALHOST), &c),
+            authorize(LOOPBACK, Permission::ReadHealth, None, Some(&store)),
             Decision::AuthenticationRequired
         );
+    }
+
+    #[test]
+    fn unknown_token_is_401() {
+        let store = store("right", &["read_all"]);
+        assert_eq!(
+            authorize(LOOPBACK, Permission::ReadHealth, Some("wrong"), Some(&store)),
+            Decision::AuthenticationRequired
+        );
+    }
+
+    #[test]
+    fn valid_token_without_permission_is_403() {
+        let store = store("ops", &["read:health"]);
+        assert_eq!(
+            authorize(LOOPBACK, Permission::ReadSystem, Some("ops"), Some(&store)),
+            Decision::InsufficientPermission
+        );
+    }
+
+    #[test]
+    fn valid_token_with_permission_is_allowed() {
+        let store = store("ops", &["read:health"]);
+        assert_eq!(
+            authorize(LOOPBACK, Permission::ReadHealth, Some("ops"), Some(&store)),
+            Decision::Allowed
+        );
+    }
+
+    #[test]
+    fn read_all_grant_covers_every_permission() {
+        let store = store("admin", &["read_all"]);
+        for p in [
+            Permission::ReadHealth,
+            Permission::ReadVersion,
+            Permission::ReadSystem,
+            Permission::ReadServices,
+            Permission::ReadUpdates,
+        ] {
+            assert_eq!(
+                authorize(LOOPBACK, p, Some("admin"), Some(&store)),
+                Decision::Allowed
+            );
+        }
     }
 
     #[test]
@@ -164,6 +241,11 @@ mod tests {
             .into_denial(Permission::ReadHealth)
             .unwrap();
         assert_eq!(denial.error.code, abora_api::ErrorCode::Unauthorized);
+
+        let denial = Decision::InsufficientPermission
+            .into_denial(Permission::ReadHealth)
+            .unwrap();
+        assert_eq!(denial.error.code, abora_api::ErrorCode::Forbidden);
 
         assert!(Decision::Allowed.into_denial(Permission::ReadHealth).is_none());
     }

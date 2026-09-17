@@ -62,15 +62,14 @@ listen_addr = "127.0.0.1:7360"
 # [security]
 # ---------------------------------------------------------------------------
 [security]
-# Require authentication for every API operation. Until token auth is
-# implemented, loopback connections are treated as trusted and remote
-# connections are refused. Keep this true.
+# Require a valid bearer token for every API operation. Token files are
+# loaded from [security].token_file when set.
 require_authentication = true
-# Allow loopback clients to be treated as trusted during the pre-token-auth
-# milestone. Set false once token authentication is implemented.
-allow_loopback_unauthenticated = true
-# Path to the future token/auth-key store. Not used yet.
-# token_file = "/etc/abora/auth.toml"
+# Bearer-token store (root-owned, mode 0600). Generate entries with:
+#   abora auth generate-token
+# Without a store, loopback clients are trusted (preview mode) and remote
+# clients are refused. Example:
+#   token_file = "/etc/abora/auth.toml"
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------

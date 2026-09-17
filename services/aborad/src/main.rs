@@ -19,12 +19,14 @@ use abora_core::{API_VERSION, DAEMON_NAME, DEFAULT_CONFIG_PATH, FRAMEWORK_NAME, 
 use abora_log::{info, warn, Logger};
 
 use crate::state::AppState;
+use crate::tokens::TokenStore;
 
 mod auth;
 mod errors;
 mod handlers;
 mod server;
 mod state;
+mod tokens;
 
 const USAGE: &str = "Usage: aborad [--config <path>] [--version] [--help]";
 
@@ -124,6 +126,45 @@ fn resolve_config(explicit: Option<PathBuf>, logger: &Logger) -> Result<LoadedCo
     }
 }
 
+/// Load the bearer-token store when configured. Authentication fails closed:
+/// if `[security] token_file` is set but the file cannot be read or parsed,
+/// the daemon refuses to start.
+fn load_token_store(config: &Config, logger: &Logger) -> Result<Option<TokenStore>, String> {
+    let Some(path) = &config.security.token_file else {
+        warn!(
+            logger,
+            "[security].token_file not configured: loopback clients are trusted, remote \
+             clients are refused. Generate tokens with `abora auth generate-token`; \
+             see docs/security.md."
+        );
+        return Ok(None);
+    };
+
+    let store = TokenStore::load(path).map_err(|e| format!("{e}"))?;
+    if !config.security.require_authentication {
+        warn!(
+            logger,
+            "[security].require_authentication = false: tokens in {} are loaded but NOT enforced",
+            path.display()
+        );
+    } else if store.is_empty() {
+        warn!(
+            logger,
+            "token file {} contains no tokens; all API requests will be rejected with 401 \
+             until tokens are added (see `abora auth generate-token`)",
+            path.display()
+        );
+    } else {
+        info!(
+            logger,
+            "token authentication enabled ({} token(s) from {})",
+            store.len(),
+            path.display()
+        );
+    }
+    Ok(Some(store))
+}
+
 fn check_bind_addr(config: &Config) -> Result<SocketAddr, String> {
     let addr: SocketAddr = config
         .remote
@@ -180,19 +221,8 @@ fn run(config_path: Option<PathBuf>) -> Result<(), String> {
             "[remote].enabled is set but remote management is not implemented; ignoring it"
         );
     }
-    if config.security.require_authentication {
-        info!(
-            logger,
-            "authentication required: loopback-only mode (remote clients are refused)"
-        );
-    }
-    if !config.security.allow_loopback_unauthenticated {
-        warn!(
-            logger,
-            "[security].allow_loopback_unauthenticated = false is not yet supported; all API \
-             requests will be refused until token authentication is implemented"
-        );
-    }
+
+    let tokens = load_token_store(&config, &logger)?;
 
     // A synchronous, pre-bound listener: errors surface before we log that
     // we are running, and the socket never accepts connections from anyone
@@ -209,7 +239,7 @@ fn run(config_path: Option<PathBuf>) -> Result<(), String> {
         .map_err(|e| format!("could not configure listener: {e}"))?;
     info!(logger, "listening on {bind_addr} (loopback only)");
 
-    let state = AppState::new(config, logger);
+    let state = AppState::new(config, logger, tokens);
     let app = server::build(state);
 
     let runtime = tokio::runtime::Builder::new_multi_thread()

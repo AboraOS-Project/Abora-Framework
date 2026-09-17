@@ -338,14 +338,18 @@ impl Default for RemoteConfig {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct SecurityConfig {
-    /// Require authentication for every API operation. Until token auth is
-    /// implemented, loopback connections are treated as trusted clients and
-    /// non-loopback connections are refused.
+    /// Require a valid bearer token for every API operation.
+    ///
+    /// When `true` and a token store (`token_file`) is configured, tokens
+    /// are enforced for **all** clients (loopback included). When `true`
+    /// but no token store exists, loopback clients remain trusted as a
+    /// preview fallback and non-loopback clients are refused; the daemon
+    /// logs a loud warning. Non-loopback clients are always refused until
+    /// authenticated remote management is implemented.
     pub require_authentication: bool,
-    /// Allow explicit opt-out that keeps the API usable on loopback during
-    /// the pre-auth milestone.
-    pub allow_loopback_unauthenticated: bool,
-    /// Path to a future auth token store. Not yet used.
+    /// Path to the bearer-token store. Tokens are stored as SHA-256 hashes
+    /// (never plaintext); generate them with `abora auth generate-token`.
+    /// The file should be root-owned with mode `0600`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token_file: Option<PathBuf>,
 }
@@ -354,7 +358,6 @@ impl Default for SecurityConfig {
     fn default() -> Self {
         Self {
             require_authentication: true,
-            allow_loopback_unauthenticated: true,
             token_file: None,
         }
     }

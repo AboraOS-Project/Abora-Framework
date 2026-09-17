@@ -89,11 +89,23 @@ Remote management is not implemented; see [docs/security.md](security.md).
 
 ### `[security]`
 
-| Key                            | Type | Default | Meaning                             |
-|--------------------------------|------|---------|-------------------------------------|
-| `require_authentication`       | bool | `true`  | Require auth for every operation    |
-| `allow_loopback_unauthenticated` | bool | `true` | Trust loopback clients until token auth lands |
-| `token_file`                   | path | none    | Future auth token store (unused)    |
+| Key                      | Type   | Default | Meaning                                |
+|--------------------------|--------|---------|----------------------------------------|
+| `require_authentication` | bool   | `true`  | Require a valid bearer token for every API operation |
+| `token_file`             | path   | none    | Bearer-token store (`0600`, hashes only) |
+
+When `token_file` is set, tokens are enforced for all clients (loopback
+included). Generate entries with:
+
+```sh
+abora auth generate-token --name=operator --permission=read_all
+# -> paste the [[tokens]] block into the token file
+```
+
+See `config/auth.toml.example` and [docs/security.md](security.md). Without
+a token file, loopback clients are trusted as a preview fallback and remote
+clients are refused; the daemon logs a warning. A configured-but-unreadable
+token file refuses startup.
 
 ### `[logging]`
 
