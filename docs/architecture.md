@@ -26,7 +26,7 @@ crates/
   abora-update   Update domain model (channels, windows, policy) + provider trait.
   abora-services Read-only service registry (systemd discovery).
 services/
-  aborad         The framework daemon: HTTP API over the above crates.
+  aborad         The framework daemon: HTTP API + auth, correlation-id, tracing layers.
 cli/
   abora          The command line client (talks to the loopback daemon only).
 config/          Shipped default configuration file.

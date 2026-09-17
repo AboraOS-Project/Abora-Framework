@@ -122,7 +122,7 @@ Every non-2xx response uses the same envelope:
   "error": {
     "code": "not_implemented",
     "message": "the update system is planned but not implemented in this milestone; see docs/update.md",
-    "request_id": null
+    "request_id": "4f2d99b17c0e8a51"
   }
 }
 ```
@@ -131,11 +131,26 @@ Every non-2xx response uses the same envelope:
 `conflict`, `not_implemented`, `service_unavailable`, `internal`, mapped 1:1
 to the conventional HTTP status.
 
+## Correlation ids
+
+Every response carries an `X-Request-ID` header. If the caller sends a
+`X-Request-ID` themselves it is echoed back unchanged (so downstream/tracing
+tools can correlate); otherwise a random 16-hex-character id is generated
+once per request. Error envelopes additionally embed the same id as
+`error.request_id`, and the daemon prefixes its request log lines with it —
+report all three when filing a bug. Caller-supplied ids must be 1–128
+characters of `[A-Za-z0-9._:-]`; anything else is ignored and replaced.
+Unknown routes (HTTP 404) return the same envelope with
+`code: "not_found"`, so every non-2xx response is consistent machine-readable
+JSON.
+
 ## Implementation notes
 
 * Axum handler functions; authorization lives in a per-route middleware
   layer, never inside handlers.
-* `request_id` is reserved for correlation; not yet generated.
+* `request_id` is populated by the outermost middleware layer on every
+  non-2xx `application/json` response, after the handler has produced the
+  envelope.
 * `[api] max_payload_bytes` and `request_timeout_secs` are enforced by the
   server skeleton (limits validated at config load).
 
