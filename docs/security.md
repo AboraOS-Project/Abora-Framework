@@ -104,7 +104,7 @@ backdoor around the bind boundary.
 | `read:health`  | `GET /api/v1/health`  |
 | `read:version` | `GET /api/v1/version` |
 | `read:system`  | `GET /api/v1/system`  |
-| `read:services`| `GET /api/v1/services`|
+| `read:services`| `GET /api/v1/services`, `GET /api/v1/services/{name}`|
 | `read:updates` | `GET /api/v1/updates` |
 | `read_all`     | all of the above      |
 

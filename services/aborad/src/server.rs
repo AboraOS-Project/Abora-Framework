@@ -57,6 +57,10 @@ pub fn build(state: SharedState) -> Router {
             with_auth(get(handlers::services), state.clone(), Permission::ReadServices),
         )
         .route(
+            &endpoint(&base_path, "services/{name}"),
+            with_auth(get(handlers::service_detail), state.clone(), Permission::ReadServices),
+        )
+        .route(
             &endpoint(&base_path, "updates"),
             with_auth(get(handlers::updates), state.clone(), Permission::ReadUpdates),
         )
@@ -442,6 +446,63 @@ mod tests {
         } else {
             // Sandboxes (e.g. Nix build) have no systemd: 503, not fake data.
             assert_eq!(status, 503);
+        }
+    }
+
+    async fn get_json(uri: &str) -> (u16, axum::http::HeaderMap, serde_json::Value) {
+        let resp = test_app(Config::default()).oneshot(loopback_request(uri)).await.unwrap();
+        let status = resp.status().as_u16();
+        let headers = resp.headers().clone();
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        (status, headers, serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null))
+    }
+
+    #[tokio::test]
+    async fn services_query_rejects_bad_input_with_the_error_envelope() {
+        for uri in [
+            "/api/v1/services?state=sleeping",
+            "/api/v1/services?enabled=maybe",
+            "/api/v1/services?limit=0",
+            "/api/v1/services?limit=100000",
+            "/api/v1/services?limit=abc",
+            "/api/v1/services?offset=-1",
+            "/api/v1/services?stat=failed",
+        ] {
+            let (status, _, v) = get_json(uri).await;
+            assert_eq!(status, 400, "{uri}");
+            assert_eq!(v["error"]["code"], "invalid_request", "{uri}");
+        }
+    }
+
+    #[tokio::test]
+    async fn services_pagination_and_total_count() {
+        if !systemctl_available() {
+            return;
+        }
+        let (status, headers, all) = get_json("/api/v1/services").await;
+        assert_eq!(status, 200);
+        let total: usize = headers["x-total-count"].to_str().unwrap().parse().unwrap();
+        assert_eq!(total, all.as_array().unwrap().len());
+
+        let (_, headers, page) = get_json("/api/v1/services?limit=1&offset=1").await;
+        assert_eq!(page.as_array().unwrap().len(), 1.min(total.saturating_sub(1)));
+        assert_eq!(headers["x-total-count"].to_str().unwrap().parse::<usize>().unwrap(), total, "count ignores paging");
+
+        let (_, _, none) = get_json("/api/v1/services?q=zzz-no-such-unit-zzz").await;
+        assert!(none.as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn service_detail_validates_and_reports_missing_units() {
+        let (status, _, v) = get_json("/api/v1/services/not-a-unit").await;
+        assert_eq!(status, 400);
+        assert_eq!(v["error"]["code"], "invalid_request");
+        let (status, _, _) = get_json("/api/v1/services/-evil.service").await;
+        assert_eq!(status, 400);
+        if systemctl_available() {
+            let (status, _, v) = get_json("/api/v1/services/zzz-no-such-unit-zzz.service").await;
+            assert_eq!(status, 404);
+            assert_eq!(v["error"]["code"], "not_found");
         }
     }
 

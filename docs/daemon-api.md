@@ -107,6 +107,42 @@ On a host without a compatible init manager the endpoint returns
 **`503 ServiceUnavailable`** (with `code: "service_unavailable"`) rather
 than an empty list that would imply success.
 
+### Filters and pagination
+
+All parameters are optional; unknown parameters and bad values are
+`400 invalid_request` (a typo never silently returns everything).
+
+| Parameter | Values | Meaning |
+|-----------|--------|---------|
+| `state`   | `running`, `stopped`, `failed`, `activating`, `deactivating`, `unknown` | Only units in that state |
+| `enabled` | `true`, `false` | Only units with that `enabled` hint (units with no hint never match) |
+| `q`       | text | Case-insensitive substring of name or description |
+| `limit`   | 1 to 1000 | Page size (default: everything) |
+| `offset`  | number | Matches to skip before the page |
+
+The body stays a plain array. The number of matches **before** `limit`/`offset`
+is returned in the `X-Total-Count` response header.
+
+```
+GET /api/v1/services?state=failed&limit=20&offset=0
+```
+
+## `GET /api/v1/services/{name}`
+
+Detail for one unit from `systemctl show`. `{name}` must be a unit name ending
+in `.service` (`400` otherwise); an unknown unit is `404 not_found`. Requires the
+same `read:services` permission as the list.
+
+```json
+{ "name": "cron.service", "load_state": "loaded", "active_state": "active",
+  "sub_state": "running", "enabled": true, "description": "Regular background program processing daemon",
+  "fragment_path": "/usr/lib/systemd/system/cron.service",
+  "exec_start": "/usr/sbin/cron -f -P", "main_pid": 812, "memory_bytes": 2412544 }
+```
+
+`load_state`, `active_state` and `sub_state` are systemd's raw values. Every
+other field is omitted when systemd does not report it.
+
 ## `GET /api/v1/updates`
 
 Returns **`501 Not Implemented`** — the update model is designed

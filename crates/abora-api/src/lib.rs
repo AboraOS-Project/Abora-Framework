@@ -21,6 +21,7 @@
 //! | GET    | `/api/v1/version`     | implemented         |
 //! | GET    | `/api/v1/system`      | implemented         |
 //! | GET    | `/api/v1/services`    | implemented (systemd) |
+//! | GET    | `/api/v1/services/{name}` | implemented (systemd) |
 //! | GET    | `/api/v1/updates`     | `501` planned       |
 //!
 //! See `docs/daemon-api.md` for the full contract.
@@ -165,6 +166,39 @@ pub struct ServiceStatus {
     pub enabled: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+}
+
+/// Detailed view of a single unit (`systemctl show`). Raw systemd values are
+/// kept as strings so we never guess at their meaning.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ServiceDetail {
+    pub name: String,
+    /// `LoadState` (`"loaded"`, `"error"`, ...).
+    pub load_state: String,
+    /// `ActiveState` (`"active"`, `"inactive"`, `"failed"`, ...).
+    pub active_state: String,
+    /// `SubState` (`"running"`, `"dead"`, `"exited"`, ...).
+    pub sub_state: String,
+    /// `UnitFileState` (`"enabled"`, `"disabled"`, `"static"`, ...),
+    /// collapsed into the two-valued `enabled` hint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// `Description`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Absolute path to the unit's fragment file (`FragmentPath`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fragment_path: Option<String>,
+    /// First `ExecStart` command line (`argv[]` portion), e.g.
+    /// `/usr/sbin/cron -f -P $EXTRA_OPTS`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exec_start: Option<String>,
+    /// PID of the main process when the unit is active (`MainPID`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub main_pid: Option<u64>,
+    /// Current memory usage in bytes (`MemoryCurrent`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_bytes: Option<u64>,
 }
 
 /// Machine-readable error classification used by all API versions.

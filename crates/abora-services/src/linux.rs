@@ -18,7 +18,7 @@ use std::collections::HashMap;
 #[cfg(target_os = "linux")]
 use std::process::Command;
 
-use abora_api::ServiceStatus;
+use abora_api::{ServiceDetail, ServiceStatus};
 
 use super::{ServiceCollector, ServicesError};
 
@@ -83,30 +83,134 @@ impl ServiceCollector for SystemdServiceManager {
     }
 }
 
+impl SystemdServiceManager {
+    /// Detailed status of a single unit (`systemctl show`).
+    pub(crate) fn detail(&self, name: &str) -> Result<ServiceDetail, ServicesError> {
+        const PROPERTIES: &[&str] = &[
+            "LoadState",
+            "ActiveState",
+            "SubState",
+            "UnitFileState",
+            "Description",
+            "FragmentPath",
+            "ExecStart",
+            "MainPID",
+            "MemoryCurrent",
+        ];
+        let mut args: Vec<String> = vec!["show".to_owned(), name.to_owned()];
+        for property in PROPERTIES {
+            args.push(format!("--property={property}"));
+        }
+        let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        // `systemctl show` is called with a validated name (see lib.rs
+        // `detail`, which rejects anything that could inject arguments).
+        let (ok, output, stderr) = run_systemctl_raw(&arg_refs)?;
+
+        // systemd versions disagree on whether `show` of a missing unit
+        // fails (stderr: "No such unit") or succeeds (LoadState=not-found).
+        // Handle both so we always return a precise NotFound.
+        if !ok && (stderr.contains("No such unit") || stderr.contains("not-found")) {
+            return Err(ServicesError::NotFound(name.to_owned()));
+        }
+        if !ok {
+            return Err(ServicesError::Systemd(format!(
+                "`systemctl {}` exited with non-zero status: {}",
+                arg_refs.join(" "),
+                stderr.trim()
+            )));
+        }
+        let props = parse_show(&output);
+
+        let load_state = props.get("LoadState").cloned().unwrap_or_default();
+        if load_state == "not-found" {
+            return Err(ServicesError::NotFound(name.to_owned()));
+        }
+
+        let active_state = props.get("ActiveState").cloned().unwrap_or_default();
+        let sub_state = props.get("SubState").cloned().unwrap_or_default();
+
+        let enabled = props
+            .get("UnitFileState")
+            .and_then(|s| file_state_enabled(s));
+
+        let optional = |key: &str| -> Option<String> {
+            props.get(key).filter(|v| !v.is_empty() && v.as_str() != "[not set]").cloned()
+        };
+
+        Ok(ServiceDetail {
+            name: name.to_owned(),
+            load_state,
+            active_state,
+            sub_state,
+            enabled,
+            description: optional("Description"),
+            fragment_path: optional("FragmentPath"),
+            exec_start: props.get("ExecStart").and_then(|v| extract_argv(v)),
+            main_pid: props
+                .get("MainPID")
+                .and_then(|v| v.trim().parse::<u64>().ok())
+                .filter(|&pid| pid != 0),
+            memory_bytes: props
+                .get("MemoryCurrent")
+                .and_then(|v| v.trim().parse::<u64>().ok()),
+        })
+    }
+}
+
+/// Pull the `argv[]=` command line out of a reported `ExecStart` value such
+/// as `{ path=/usr/sbin/cron ; argv[]=/usr/sbin/cron -f -P $EXTRA_OPTS ; ... }`.
+fn extract_argv(value: &str) -> Option<String> {
+    let start = value.find("argv[]=")? + "argv[]=".len();
+    let rest = &value[start..];
+    let end = rest.find(" ;").or_else(|| rest.find('}')).unwrap_or(rest.len());
+    let raw = rest[..end].trim();
+    if raw.is_empty() { None } else { Some(raw.to_owned()) }
+}
+
+/// Parse `systemctl show unit` output: `KEY=value` lines, blank-separated
+/// when a property repeats. The first value seen wins.
+fn parse_show(text: &str) -> HashMap<String, String> {
+    let mut props = HashMap::new();
+    for line in text.lines() {
+        let Some((key, value)) = line.split_once('=') else {
+            continue; // blank line between multi-value properties
+        };
+        props.entry(key.to_owned()).or_insert_with(|| value.to_owned());
+    }
+    props
+}
+
 /// Run `systemctl` with the shared read-only flag set and the given
-/// positional arguments.
+/// positional arguments. Fails if the command cannot be executed or exits
+/// non-zero.
 #[cfg(target_os = "linux")]
 fn run_systemctl(args: &[&str]) -> Result<String, ServicesError> {
+    let (ok, stdout, stderr) = run_systemctl_raw(args)?;
+    if !ok {
+        return Err(ServicesError::Systemd(format!(
+            "`systemctl {}` exited with non-zero status: {}",
+            args.join(" "),
+            stderr.trim()
+        )));
+    }
+    Ok(stdout)
+}
+
+/// Execute `systemctl` with the shared read-only flag set, returning
+/// `(success, stdout, stderr)` so callers can interpret odd statuses.
+#[cfg(target_os = "linux")]
+fn run_systemctl_raw(args: &[&str]) -> Result<(bool, String, String), ServicesError> {
     let output = Command::new("systemctl")
         .args(["--no-legend", "--no-pager", "--no-ask-password", "--plain"])
         .args(args)
         .output()
         .map_err(|e| ServicesError::Systemd(format!("could not execute `systemctl`: {e}")))?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(ServicesError::Systemd(format!(
-            "`systemctl {}` exited with {}{}",
-            args.join(" "),
-            output.status,
-            if stderr.trim().is_empty() {
-                String::new()
-            } else {
-                format!(": {}", stderr.trim())
-            }
-        )));
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    Ok((
+        output.status.success(),
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    ))
 }
 
 /// Parse `systemctl list-units --type=service` output. Lines are
