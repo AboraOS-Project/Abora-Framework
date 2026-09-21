@@ -18,7 +18,7 @@ sysinfo, API skeleton, read-only daemon, CLI, docs).
 ## Milestone 2 — updates
 
 - [x] Persistent update state + history store (`abora_update::UpdateStore`; not yet wired into the daemon).
-- [ ] A real `UpdateProvider` implementation (host packages first).
+- [x] A real `UpdateProvider` implementation: `HostPackageProvider` (apt, read-only check; `apply` still refused).
 - [ ] Poll scheduler honouring `[maintenance]` windows and `reboot_policy`.
 - [ ] `GET /api/v1/updates` (status / available / history) replacing the `501`.
 

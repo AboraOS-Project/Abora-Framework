@@ -9,6 +9,7 @@ authors.workspace = true
 
 [dependencies]
 abora-core = { path = "../abora-core" }
+abora-log = { path = "../abora-log" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

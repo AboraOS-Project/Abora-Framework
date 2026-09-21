@@ -21,7 +21,9 @@ use std::fmt;
 
 use abora_core::Version;
 
+pub mod host;
 pub mod store;
+pub use host::HostPackageProvider;
 pub use store::{Opened, StoreError, UpdateStore};
 
 /// Named update channels in order of stability (stable is the default).

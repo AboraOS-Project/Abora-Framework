@@ -51,6 +51,26 @@ JSON file (the caller picks the path; the intended default is `/var/lib/abora/up
 It is not connected to the daemon yet: the provider and scheduler (next roadmap items) will
 own one and `GET /api/v1/updates` will read from it.
 
+## Host packages (`HostPackageProvider`)
+
+The first real provider, and deliberately **read-only**: it never installs anything (`apply`
+keeps the trait's refusal).
+
+| Call | How |
+|------|-----|
+| `check` | `apt-get -s -o Debug::NoLocking=1 upgrade`, a simulation that needs no root and changes nothing. Each `Inst` line becomes an `AvailableUpdate` (component = package, summary = `pkg: old -> new (source)`). |
+| `status` | From the last `check`: `up_to_date`, `update_available` (`pkg version` strings) or `error`. Before any check it is a conflict ("no update check has run yet"), never a false "up to date". |
+| `reboot_required` | `/var/run/reboot-required` (and `.pkgs` for the reason); remembered in the store with when it was first seen, cleared when the marker goes. |
+| `history` | From the `UpdateStore`. |
+
+Notes: it reads the package lists apt already has (refreshing them needs root and is left to
+the system's own timers). Debian versions are not semver, so `AvailableUpdate.version` is a
+best-effort `a.b.c` from the leading digits and the exact string is in the summary. apt does
+not report sizes in a simulation, so `size_bytes` is `0` (unknown). Host packages have no
+channels: the `channel` argument is echoed back. Programs are run without a shell, with fixed
+arguments, `LC_ALL=C` and a 120 s timeout; package names are validated. Checked against this
+development machine, it found the same 209 upgrades as `apt-get -s` itself.
+
 ## The `UpdateProvider` trait
 
 ```rust
