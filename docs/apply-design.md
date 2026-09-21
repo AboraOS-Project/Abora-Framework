@@ -84,5 +84,7 @@ Key rules:
   edited config file (no prompt), leaves `dpkg --audit` clean, records the history and the audit
   line, and that a forged request outside the window, or with a hostile package name, is refused by
   the helper itself. Never run on a developer machine's own packages.
-* Not covered: the systemd path unit driving a real upgrade (the unit and its trigger were tested
-  separately), reboots, and a full VM install with `useradd` and `StateDirectory` ownership.
+* **`make test-systemd`** (`scripts/test-systemd-docker.sh`, also run in CI): the full real deployment in a
+  throwaway container running systemd: the real installer, `aborad` as the unprivileged user under its hardened
+  unit, the **systemd path unit** starting the root helper, and a real upgrade. See `installer/README.md`.
+* Not covered: a reboot (the `systemctl reboot` path), other distributions, real hardware.

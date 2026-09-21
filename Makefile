@@ -7,7 +7,11 @@
 test-apply:
 	@scripts/test-apply-docker.sh
 
-.PHONY: test-apply fork-check all iso run run-headless boot-test screenshot build test clean distclean help
+## test-systemd  Test the real install, systemd units and update helper in a throwaway systemd container
+test-systemd:
+	@scripts/test-systemd-docker.sh
+
+.PHONY: test-systemd test-apply fork-check all iso run run-headless boot-test screenshot build test clean distclean help
 
 all: iso
 

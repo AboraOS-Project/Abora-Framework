@@ -350,7 +350,15 @@ impl UpdatesState {
             succeeded: result.succeeded,
             note: Some(note),
         };
-        self.store.record_update(entry).is_ok()
+        let recorded = self.store.record_update(entry).is_ok();
+        if recorded && result.succeeded {
+            // Do not keep listing what was just upgraded while waiting for the next check.
+            self.available
+                .write()
+                .expect("updates lock poisoned")
+                .retain(|u| !result.packages.contains(&u.component));
+        }
+        recorded
     }
 }
 
@@ -487,6 +495,8 @@ mod tests {
     fn a_helper_result_becomes_one_history_entry() {
         let dir = scratch("ingest");
         let updates = UpdatesState::with_runner(Box::new(Canned), dir.clone(), || None);
+        updates.refresh(&Channel::Stable).unwrap(); // openssl is available
+        assert_eq!(updates.response().available.len(), 1);
         let result = abora_update::apply::ApplyResult {
             id: "apply-00aa11bb22cc33dd".into(),
             started_at: "2026-09-21T03:00:00Z".into(),
@@ -522,6 +532,10 @@ mod tests {
             "{note}"
         );
         assert!(note.contains("policy does not allow"));
+        assert!(
+            updates.response().available.is_empty(),
+            "the package that was just upgraded is no longer listed as available"
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 

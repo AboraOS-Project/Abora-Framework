@@ -66,8 +66,15 @@ See [docs/apply-design.md](../docs/apply-design.md).
   request accepted, status `installing`, helper ran with the exact expected arguments, history entry
   recorded, audit line logged, request file removed. No real package was installed.
 * `make test-apply` upgrades a real `.deb` through the real daemon and helper in a throwaway Docker container
-  (see `docs/apply-design.md`), including refusing forged requests.
-* **Not yet tested:** the path unit driving a real upgrade, a reboot, and a real root install (`useradd`, `StateDirectory` ownership, `ProtectHome`)
+  (see `docs/apply-design.md`), including refusing forged requests and the opt-in automatic apply.
+* **`make test-systemd`** (also in CI) is the real deployment test, in a throwaway container running systemd:
+  the real installer as root (creates the `aborad` user, `/etc/abora` is `root:aborad 0750`), `aborad` under its
+  real hardened unit as the unprivileged user (its apt check works inside the sandbox), `abora updates apply`,
+  the **systemd path unit starting the root helper**, a real `.deb` upgraded, the result root-owned, history and
+  audit recorded, the `aborad` user unable to write `/var/lib/abora-apply`, `/etc/abora` or `/usr/sbin`, an
+  edited config kept on re-install, and the real `--uninstall` / `--purge`. The container has `CAP_SYS_ADMIN` but is
+  not `--privileged`.
+* **Not yet tested:** a reboot (the helper's `systemctl reboot` path), other distributions, and real hardware (`useradd`, `StateDirectory` ownership, `ProtectHome`)
   on a clean machine. Try it in a VM or container before relying on it.
 
 ## Why no .deb/.rpm yet

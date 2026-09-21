@@ -106,7 +106,7 @@ Remote management is not implemented; see [docs/security.md](security.md).
 | Key                      | Type   | Default | Meaning                                |
 |--------------------------|--------|---------|----------------------------------------|
 | `require_authentication` | bool   | `true`  | Require a valid bearer token for every API operation |
-| `token_file`             | path   | none    | Bearer-token store (`0600`, hashes only) |
+| `token_file`             | path   | none    | Bearer-token store (hashes only). When `aborad` runs as its own user (the systemd unit), make it readable by that user: `chown root:aborad` and `chmod 640`, e.g. `/etc/abora/tokens.toml`. Never world-readable |
 
 When `token_file` is set, tokens are enforced for all clients (loopback
 included). Generate entries with:

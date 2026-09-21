@@ -1,8 +1,9 @@
 //! Bearer-token store for `aborad`.
 //!
 //! Tokens are stored as **SHA-256 hashes**, never as plaintext, in a
-//! dedicated, root-owned, mode-`0600` TOML file referenced by
-//! `[security] token_file`. Incoming `Authorization: Bearer` secrets are
+//! dedicated TOML file referenced by `[security] token_file`. It must not
+//! be world-readable: mode `0600` when `aborad` runs as the file's owner,
+//! or `root:aborad` mode `0640` when it runs as the `aborad` service user. Incoming `Authorization: Bearer` secrets are
 //! hashed and compared in constant time; the secret itself can never be
 //! recovered from the file.
 //!

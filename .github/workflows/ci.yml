@@ -42,6 +42,17 @@ jobs:
       - name: Upgrade a real .deb through aborad and abora-apply
         run: scripts/test-apply-docker.sh
 
+  systemd:
+    name: real install and systemd units (Docker)
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install, start under systemd, apply a real upgrade, uninstall
+        run: scripts/test-systemd-docker.sh
+
   iso:
     name: live ISO boots
     needs: check
