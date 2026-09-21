@@ -17,9 +17,10 @@ cd "$ROOT"
 # Only files tracked by git, or all files if this is not a git checkout.
 if git rev-parse --git-dir >/dev/null 2>&1; then FILES="$(git ls-files)"; else FILES="$(find . -type f -not -path './target/*' -not -path './build/*' | sed 's#^\./##')"; fi
 
-# Match the marker only at the start of a comment (# or //), so docs and this script don't count.
+# Match the marker only at the start of a comment (# or //). Markdown files are skipped so
+# the examples in docs/forking.md are not mistaken for real markers.
 PATTERN='^[[:space:]]*(#|//)[[:space:]]*ABORA-SYSTEM-FILE[[:space:]]+[0-9]+:'
-LIST="$(printf '%s\n' "$FILES" | xargs -d '\n' grep -InE "$PATTERN" 2>/dev/null \
+LIST="$(printf '%s\n' "$FILES" | grep -v '\.md$' | xargs -d '\n' grep -InE "$PATTERN" 2>/dev/null \
     | sed -E 's/^([^:]+):([0-9]+):[[:space:]]*(#|\/\/)[[:space:]]*ABORA-SYSTEM-FILE[[:space:]]+([0-9]+):[[:space:]]*(.*)$/\4\t\1:\2\t\5/' \
     | sort -n || true)"
 
