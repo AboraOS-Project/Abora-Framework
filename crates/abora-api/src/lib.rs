@@ -22,7 +22,7 @@
 //! | GET    | `/api/v1/system`      | implemented         |
 //! | GET    | `/api/v1/services`    | implemented (systemd) |
 //! | GET    | `/api/v1/services/{name}` | implemented (systemd) |
-//! | GET    | `/api/v1/updates`     | `501` planned       |
+//! | GET    | `/api/v1/updates`     | implemented (read-only, apt) |
 //!
 //! See `docs/daemon-api.md` for the full contract.
 
@@ -199,6 +199,22 @@ pub struct ServiceDetail {
     /// Current memory usage in bytes (`MemoryCurrent`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memory_bytes: Option<u64>,
+}
+
+/// Body of `GET /api/v1/updates`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct UpdatesResponse {
+    /// Result of the last check. Omitted until the first check has run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<UpdateStatus>,
+    /// When the update source was last checked (RFC 3339), if ever.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_check: Option<String>,
+    pub reboot: RebootStatus,
+    /// Updates found by the last check.
+    pub available: Vec<AvailableUpdate>,
+    /// Applied updates, newest first.
+    pub history: Vec<UpdateHistoryEntry>,
 }
 
 /// Machine-readable error classification used by all API versions.

@@ -19,7 +19,7 @@ machine-readable reference: [`crates/abora-api`](../crates/abora-api/src/lib.rs)
 | GET    | `/api/v1/version`     | implemented     |
 | GET    | `/api/v1/system`      | implemented     |
 | GET    | `/api/v1/services`    | implemented (systemd) |
-| GET    | `/api/v1/updates`     | `501` planned   |
+| GET    | `/api/v1/updates`     | implemented (read-only, apt) |
 
 All endpoints require loopback source addresses today (see
 [docs/security.md](security.md)). When `[security] token_file` is
@@ -145,9 +145,34 @@ other field is omitted when systemd does not report it.
 
 ## `GET /api/v1/updates`
 
-Returns **`501 Not Implemented`** — the update model is designed
-(`crates/abora-update`), the delivery machinery is not. We will not fake
-status, see [docs/update.md](update.md).
+Read-only update information. Nothing is installed, and this call runs no check: the daemon
+checks (with `apt-get -s`, a simulation) once at startup, and until the scheduler exists
+that is what this reports. See [docs/update.md](update.md).
+
+```json
+{
+  "status": { "state": "update_available", "versions": ["openssl 3.0.13-0ubuntu3.5"] },
+  "last_check": "2026-09-21T00:56:07.391Z",
+  "reboot": { "required": false },
+  "available": [
+    { "channel": "stable", "version": { "major": 3, "minor": 0, "patch": 13, "prerelease": null, "build": null },
+      "component": "openssl",
+      "summary": "openssl: 3.0.13-0ubuntu3.4 -> 3.0.13-0ubuntu3.5 (Ubuntu:24.04/noble-updates [amd64])",
+      "size_bytes": 0 }
+  ],
+  "history": []
+}
+```
+
+* `status` and `last_check` are **omitted until the first check has finished**, and are never
+  guessed. `status.state` is `up_to_date`, `update_available`, `installing` or `error`
+  (`error` carries a `message`, for example when `apt-get` is missing).
+* `reboot.required` reflects `/var/run/reboot-required`; `pending_since` and `reason` are set when known.
+* `available` is what the last check found (`size_bytes: 0` means unknown; the exact Debian
+  version is in `summary`). `history` is applied updates, newest first; it stays empty until
+  installing exists.
+* State is kept in `[updates] state_file`. If that cannot be opened the daemon warns and keeps
+  it in memory only.
 
 ## Errors
 

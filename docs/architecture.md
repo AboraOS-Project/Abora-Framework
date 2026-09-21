@@ -67,9 +67,9 @@ crate may depend on.
 See [docs/daemon-api.md](daemon-api.md) for the full reference.
 
 * Path prefix `/api/v1` (configurable via `[api] base_path`).
-* Read-only endpoints: `health`, `version`, `system`, `services`.
-* `updates` intentionally returns `501 Not Implemented` — the model exists
-  (`abora-update`) but the machinery does not, and we won't fake it.
+* Read-only endpoints: `health`, `version`, `system`, `services`, `updates`.
+* `updates` reports what the read-only apt provider found (`abora-update`). Installing
+  updates is not implemented, and `status` is omitted rather than guessed before the first check.
 * Every route is guarded by a per-operation permission enforced in a
   middleware layer. Today only loopback clients are admitted.
 

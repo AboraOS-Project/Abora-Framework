@@ -10,7 +10,8 @@ version for operators lives in the root [`SECURITY.md`](../SECURITY.md).
 2. **No arbitrary remote execution, ever.** There is and will be no endpoint
    that runs shell commands or executes user-supplied payloads.
 3. **Be honest about scope.** Where machinery is not implemented, the API
-   says so explicitly (e.g. `501` for updates) instead of faking success.
+   says so explicitly (e.g. `501`, or an omitted `status` before the first update check)
+   instead of faking success.
 4. **Least privilege.** Every route declares the single permission it needs;
    handlers never self-authorize. Tokens grant exactly the permissions they
    list.

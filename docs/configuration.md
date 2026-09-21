@@ -57,8 +57,10 @@ Loading always parses *and* validates. Invalid config is rejected loudly:
 | `automatic`     | bool            | `true`   | Install available updates automatically (inside windows) |
 | `check_interval`| string          | `6h`     | Poll interval: `<n>s`, `<n>m`, `<n>h`, or `<n>d` |
 | `reboot_policy` | string          | `ask`    | Reboot outside a window: `ask`, `always`, `never` |
+| `state_file`    | absolute path   | `/var/lib/abora/updates.json` | Update history and state; read at startup (restart to change). If it cannot be opened the daemon logs a warning and keeps state in memory only |
 
-Not yet implemented end-to-end; see [docs/update.md](update.md).
+Update checking is read-only today (`GET /api/v1/updates`); installing and the scheduler behind
+`check_interval`, `automatic` and `reboot_policy` are not implemented yet. See [docs/update.md](update.md).
 
 ### `[maintenance]` — scheduled windows
 

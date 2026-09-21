@@ -8,6 +8,7 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+abora-update = { path = "../../crates/abora-update" }
 abora-api = { path = "../../crates/abora-api" }
 abora-config = { path = "../../crates/abora-config" }
 abora-core = { path = "../../crates/abora-core" }

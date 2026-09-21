@@ -10,7 +10,7 @@ use axum::Json;
 
 use abora_api::{
     ApiErrorBody, ApiVersionInfo, DaemonInfo, ErrorCode, HealthResponse, HealthStatus,
-    ServiceDetail, ServiceState, SystemResponse, VersionResponse,
+    ServiceDetail, ServiceState, SystemResponse, UpdatesResponse, VersionResponse,
 };
 use abora_core::{DAEMON_NAME, FRAMEWORK_NAME, Version};
 
@@ -190,11 +190,9 @@ pub async fn service_detail(
 
 /// `GET /api/v1/updates`
 ///
-/// Update infrastructure is designed (see `crates/abora-update`) but not
-/// implemented. Return `501` honestly instead of inventing status.
-pub async fn updates() -> ApiError {
-    ApiError(ApiErrorBody::new(
-        ErrorCode::NotImplemented,
-        "the update system is planned but not implemented in this milestone; see docs/update.md",
-    ))
+/// Read-only: status of the last check, when it ran, whether a reboot is pending, the
+/// updates that check found, and the history. Nothing is installed and no check is run
+/// here; the daemon checks at startup. Before the first check finishes `status` is omitted.
+pub async fn updates(State(state): State<SharedState>) -> Json<UpdatesResponse> {
+    Json(state.updates.response())
 }

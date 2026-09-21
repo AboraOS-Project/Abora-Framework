@@ -170,6 +170,12 @@ impl Config {
             }
         }
 
+        if !self.updates.state_file.is_absolute() {
+            errors.push(format!(
+                "[updates] state_file `{}` must be an absolute path",
+                self.updates.state_file.display()
+            ));
+        }
         if let Err(e) = parse_duration(&self.updates.check_interval) {
             errors.push(format!(
                 "[updates] check_interval `{}` is not a valid duration: {e}",
@@ -280,6 +286,8 @@ pub struct UpdatesConfig {
     /// How often to poll for updates, e.g. `"6h"`, `"30m"`, `"1d"`.
     pub check_interval: String,
     pub reboot_policy: RebootPolicy,
+    /// Where update history and state are stored (absolute path). Read at startup; changing it needs a restart.
+    pub state_file: PathBuf,
 }
 
 impl Default for UpdatesConfig {
@@ -289,6 +297,7 @@ impl Default for UpdatesConfig {
             automatic: true,
             check_interval: "6h".to_owned(),
             reboot_policy: RebootPolicy::default(),
+            state_file: PathBuf::from("/var/lib/abora/updates.json"),
         }
     }
 }
@@ -516,6 +525,14 @@ experimental_x = true
 [cloud.telemetry]
 enabled = true
 "#;
+
+    #[test]
+    fn relative_state_file_is_rejected() {
+        let mut cfg = Config::default();
+        cfg.updates.state_file = PathBuf::from("updates.json");
+        let errors = cfg.validate().unwrap_err();
+        assert!(errors.iter().any(|e| e.contains("state_file")), "got: {errors:?}");
+    }
 
     #[test]
     fn parses_a_documented_configuration() {

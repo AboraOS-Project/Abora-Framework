@@ -31,6 +31,8 @@ automatic = true
 check_interval = "6h"
 # Reboot outside a maintenance window: "ask", "always", "never".
 reboot_policy = "ask"
+# Where update history and state are kept (absolute path; restart to change).
+state_file = "/var/lib/abora/updates.json"
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------

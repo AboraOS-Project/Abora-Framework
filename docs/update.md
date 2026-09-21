@@ -48,8 +48,7 @@ JSON file (the caller picks the path; the intended default is `/var/lib/abora/up
   (`Opened::Recovered`). A file from a newer schema is refused, never overwritten.
 * Timestamps come from the caller, so the store has no clock.
 
-It is not connected to the daemon yet: the provider and scheduler (next roadmap items) will
-own one and `GET /api/v1/updates` will read from it.
+`aborad` opens it at `[updates] state_file` and `GET /api/v1/updates` reads from it.
 
 ## Host packages (`HostPackageProvider`)
 

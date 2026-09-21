@@ -13,6 +13,7 @@
 use std::net::{SocketAddr, TcpListener};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use abora_config::{Config, ConfigError};
@@ -20,7 +21,9 @@ use abora_core::{API_VERSION, DAEMON_NAME, DEFAULT_CONFIG_PATH, FRAMEWORK_NAME, 
 use abora_log::{info, warn, Logger};
 
 use crate::reload::ReloadSource;
-use crate::state::{AppState, SharedState};
+use abora_update::{Opened, UpdateStore};
+
+use crate::state::{AppState, SharedState, UpdatesState};
 use crate::tokens::TokenStore;
 
 mod auth;
@@ -197,6 +200,36 @@ fn fingerprint(path: &Path) -> FileFingerprint {
         .and_then(|m| m.modified().ok().map(|t| (t, m.len())))
 }
 
+/// Open the update store named by `[updates] state_file`. If it cannot be opened (for
+/// example the directory does not exist or is not writable) the daemon still starts and
+/// keeps update state in memory only, and says so.
+fn open_updates(config: &Config, logger: &Logger) -> UpdatesState {
+    let path = &config.updates.state_file;
+    match UpdateStore::open(path) {
+        Ok((store, Opened::Loaded)) => {
+            info!(logger, "update state loaded from {}", path.display());
+            UpdatesState::host(Arc::new(store))
+        }
+        Ok((store, Opened::Fresh)) => {
+            info!(logger, "no update state at {} yet; starting empty", path.display());
+            UpdatesState::host(Arc::new(store))
+        }
+        Ok((store, Opened::Recovered { backup })) => {
+            warn!(
+                logger,
+                "update state {} was unreadable; moved to {} and starting empty",
+                path.display(),
+                backup.display()
+            );
+            UpdatesState::host(Arc::new(store))
+        }
+        Err(e) => {
+            warn!(logger, "{e}; update history will not be saved");
+            UpdatesState::host(Arc::new(UpdateStore::in_memory()))
+        }
+    }
+}
+
 fn run(config_path: Option<PathBuf>) -> Result<(), String> {
     // Bootstrap a minimal logger for the config-resolution phase; the real
     // logger is configured below from the loaded config.
@@ -264,8 +297,20 @@ fn run(config_path: Option<PathBuf>) -> Result<(), String> {
         .map_err(|e| format!("could not configure listener: {e}"))?;
     info!(logger, "listening on {bind_addr} (loopback only)");
 
-    let state = AppState::new(config, logger, tokens);
+    let updates = open_updates(&config, &logger);
+    let channel = config.updates.channel.clone();
+    let state = AppState::with_updates(config, logger, tokens, updates);
     let app = server::build(state.clone());
+
+    // First update check, off the async threads (it runs `apt-get`). Periodic checks come
+    // with the scheduler; until then this is what fills in GET /api/v1/updates.
+    {
+        let state = state.clone();
+        std::thread::spawn(move || match state.updates.refresh(&channel) {
+            Ok(n) => info!(state.logger, "update check finished: {n} update(s) available"),
+            Err(e) => warn!(state.logger, "update check failed: {e}"),
+        });
+    }
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()

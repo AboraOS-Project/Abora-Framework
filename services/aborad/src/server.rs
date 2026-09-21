@@ -507,13 +507,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn updates_is_honest_501() {
-        let app = test_app(Config::default());
-        let resp = app.oneshot(loopback_request("/api/v1/updates")).await.unwrap();
-        assert_eq!(resp.status(), 501);
-        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
-        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(v["error"]["code"], "not_implemented");
+    async fn updates_before_any_check_reports_nothing_known() {
+        let (status, _, v) = get_json("/api/v1/updates").await;
+        assert_eq!(status, 200);
+        assert!(v.get("status").is_none(), "no status claimed before a check: {v}");
+        assert!(v.get("last_check").is_none());
+        assert_eq!(v["reboot"]["required"], false);
+        assert_eq!(v["available"], serde_json::json!([]));
+        assert_eq!(v["history"], serde_json::json!([]));
     }
 
     #[tokio::test]
@@ -587,15 +588,16 @@ mod tests {
     #[tokio::test]
     async fn error_envelope_carries_request_id() {
         let app = test_app(Config::default());
-        let mut req = loopback_request("/api/v1/updates");
+        // A bad query is a 400 with the normal envelope.
+        let mut req = loopback_request("/api/v1/services?limit=0");
         req.headers_mut()
             .insert(X_REQUEST_ID, HeaderValue::from_static("trace-42"));
         let resp = app.oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), 501);
+        assert_eq!(resp.status(), 400);
         assert_eq!(resp.headers().get(X_REQUEST_ID).unwrap(), "trace-42");
         let bytes = resp.into_body().collect().await.unwrap().to_bytes();
         let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(v["error"]["code"], "not_implemented");
+        assert_eq!(v["error"]["code"], "invalid_request");
         assert_eq!(v["error"]["request_id"], "trace-42");
     }
 
