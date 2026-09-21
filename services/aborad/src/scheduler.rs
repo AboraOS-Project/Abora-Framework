@@ -9,53 +9,16 @@
 //! implemented yet, so the policy is *reported* (and logged when it changes), never acted on.
 //! The configuration is re-read on every tick, so a reload takes effect within seconds.
 
-use std::process::Command;
 use std::time::{Duration, Instant};
 
 use abora_api::ScheduleInfo;
-use abora_config::schedule::{check_interval, check_is_due, permissions, LocalTime, Permissions};
+use abora_config::schedule::{check_interval, check_is_due, local_time, permissions, Permissions};
 use abora_log::{info, warn};
-use abora_update::Weekday;
 
 use crate::state::SharedState;
 
 /// How often the policy is re-evaluated and a due check is looked for.
 const TICK: Duration = Duration::from_secs(30);
-
-/// The server's local time, from `date` (which honours `TZ` and `/etc/localtime`, and the
-/// standard library has no way to ask). `None` if it cannot be determined.
-pub fn local_time() -> Option<LocalTime> {
-    let out = Command::new("date")
-        .arg("+%u %H:%M")
-        .env("LC_ALL", "C")
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    parse_date_output(&String::from_utf8_lossy(&out.stdout))
-}
-
-/// Parse `date +"%u %H:%M"` output such as `7 03:15` (`%u` is 1 = Monday .. 7 = Sunday).
-fn parse_date_output(text: &str) -> Option<LocalTime> {
-    let (day, clock) = text.trim().split_once(' ')?;
-    let (hour, minute) = clock.split_once(':')?;
-    let weekday = match day {
-        "1" => Weekday::Monday,
-        "2" => Weekday::Tuesday,
-        "3" => Weekday::Wednesday,
-        "4" => Weekday::Thursday,
-        "5" => Weekday::Friday,
-        "6" => Weekday::Saturday,
-        "7" => Weekday::Sunday,
-        _ => return None,
-    };
-    let (hour, minute): (u32, u32) = (hour.parse().ok()?, minute.parse().ok()?);
-    (hour < 24 && minute < 60).then_some(LocalTime {
-        weekday,
-        minutes: hour * 60 + minute,
-    })
-}
 
 /// Runs for the life of the daemon. The first pass checks for updates immediately.
 pub async fn run(state: SharedState) {
@@ -85,6 +48,7 @@ pub async fn run(state: SharedState) {
         state.updates.set_schedule(ScheduleInfo {
             check_interval_seconds: interval.as_secs(),
             in_maintenance_window: perms.in_maintenance_window,
+            apply_permitted: perms.apply_permitted,
             installs_permitted: perms.installs_permitted,
             reboot_permitted: perms.reboot_permitted,
         });
@@ -98,6 +62,22 @@ pub async fn run(state: SharedState) {
             );
         }
         previous = Some(perms);
+
+        // If the helper has finished an apply, record it and look at what is left.
+        let ingest_channel = channel.clone();
+        let ingest_state = state.clone();
+        let ingested = tokio::task::spawn_blocking(move || {
+            ingest_state.updates.ingest_apply_result(&ingest_channel)
+        })
+        .await
+        .unwrap_or(false);
+        if ingested {
+            info!(
+                state.logger,
+                "an update apply finished; recorded in the history"
+            );
+            last_attempt = None;
+        }
 
         let due = match last_attempt {
             None => true,
@@ -128,59 +108,5 @@ pub async fn run(state: SharedState) {
         }
 
         tokio::time::sleep(TICK).await;
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn date_output_is_parsed() {
-        assert_eq!(
-            parse_date_output("7 03:15\n"),
-            Some(LocalTime {
-                weekday: Weekday::Sunday,
-                minutes: 3 * 60 + 15
-            })
-        );
-        assert_eq!(
-            parse_date_output("1 00:00"),
-            Some(LocalTime {
-                weekday: Weekday::Monday,
-                minutes: 0
-            })
-        );
-        assert_eq!(
-            parse_date_output("5 23:59"),
-            Some(LocalTime {
-                weekday: Weekday::Friday,
-                minutes: 23 * 60 + 59
-            })
-        );
-    }
-
-    #[test]
-    fn garbage_date_output_is_rejected() {
-        for bad in [
-            "",
-            "0 01:00",
-            "8 01:00",
-            "3 25:00",
-            "3 12:60",
-            "Tue 10:00",
-            "3",
-            "3 10-30",
-        ] {
-            assert_eq!(parse_date_output(bad), None, "{bad:?}");
-        }
-    }
-
-    #[test]
-    fn the_real_date_command_gives_a_time() {
-        // `date` exists on every Unix this daemon targets.
-        if Command::new("date").arg("--version").output().is_ok() {
-            assert!(local_time().is_some());
-        }
     }
 }

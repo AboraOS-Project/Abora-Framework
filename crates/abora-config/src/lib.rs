@@ -186,6 +186,12 @@ impl Config {
             }
         }
 
+        if !self.updates.apply_result_file.is_absolute() {
+            errors.push(format!(
+                "[updates] apply_result_file `{}` must be an absolute path",
+                self.updates.apply_result_file.display()
+            ));
+        }
         if !self.updates.state_file.is_absolute() {
             errors.push(format!(
                 "[updates] state_file `{}` must be an absolute path",
@@ -296,6 +302,9 @@ pub struct UpdatesConfig {
     pub reboot_policy: RebootPolicy,
     /// Where update history and state are stored (absolute path). Read at startup; changing it needs a restart.
     pub state_file: PathBuf,
+    /// Where the root update helper writes the outcome of an apply (absolute path). `aborad` and
+    /// `abora-apply` both read this setting, so they always agree.
+    pub apply_result_file: PathBuf,
 }
 
 impl Default for UpdatesConfig {
@@ -306,6 +315,7 @@ impl Default for UpdatesConfig {
             check_interval: "6h".to_owned(),
             reboot_policy: RebootPolicy::default(),
             state_file: PathBuf::from("/var/lib/abora/updates.json"),
+            apply_result_file: PathBuf::from(abora_update::apply::DEFAULT_RESULT_FILE),
         }
     }
 }

@@ -21,6 +21,7 @@ use std::fmt;
 
 use abora_core::Version;
 
+pub mod apply;
 pub mod host;
 pub mod store;
 pub use host::HostPackageProvider;

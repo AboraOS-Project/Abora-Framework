@@ -1,8 +1,15 @@
 # Design: applying updates (proposal, not implemented)
 
-Status: **proposal for review.** Nothing here exists yet. Today the framework only *checks* for
-updates (`docs/update.md`). Applying them is the first feature that changes the system, so the
-design below is deliberately conservative.
+Status: **implemented, manual apply only** (decisions: separate root helper; manual first;
+everything apt lists). Automatic apply when a window opens is *not* implemented. Applying updates is
+the first feature that changes the system, so the design is deliberately conservative.
+
+How it maps to code: `crates/abora-update/src/apply.rs` (request/result types and validation),
+`services/abora-apply` (the helper), `POST /api/v1/updates/apply` in `services/aborad`, units in
+`installer/systemd/abora-apply.{path,service}`. One deviation from the sketch below: `aborad` reads
+the outcome from a result file the helper writes to a root-owned directory
+(`[updates] apply_result_file`) and records it in the history, so `aborad` stays the only writer of
+its own state file.
 
 ## The core problem
 
@@ -58,7 +65,7 @@ Key rules:
   Automatic apply is a later, separate switch.
 * No non-apt providers yet.
 
-## Decisions needed
+## Decisions (made)
 
 1. **Helper vs root daemon.** Recommended: separate root helper as above. Alternative: run `aborad`
    as root (simpler, much weaker).

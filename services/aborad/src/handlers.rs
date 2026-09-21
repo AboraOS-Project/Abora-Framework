@@ -3,18 +3,20 @@
 
 use std::collections::HashMap;
 
-use axum::extract::{Path, Query, State};
-use axum::http::{HeaderName, HeaderValue};
+use axum::extract::{Extension, Path, Query, State};
+use axum::http::{HeaderName, HeaderValue, StatusCode};
 use axum::response::{AppendHeaders, IntoResponse};
 use axum::Json;
 
 use abora_api::{
-    ApiErrorBody, ApiVersionInfo, DaemonInfo, ErrorCode, HealthResponse, HealthStatus,
-    ServiceDetail, ServiceState, SystemResponse, UpdatesResponse, VersionResponse,
+    ApiErrorBody, ApiVersionInfo, ApplyResponse, DaemonInfo, ErrorCode, HealthResponse,
+    HealthStatus, ServiceDetail, ServiceState, SystemResponse, UpdatesResponse, VersionResponse,
 };
 use abora_core::{Version, DAEMON_NAME, FRAMEWORK_NAME};
 
+use crate::auth::Caller;
 use crate::errors::ApiError;
+use crate::state::ApplyRefusal;
 use crate::state::SharedState;
 
 /// `GET /api/v1/health`
@@ -206,4 +208,60 @@ pub async fn service_detail(
 /// here; the daemon checks at startup. Before the first check finishes `status` is omitted.
 pub async fn updates(State(state): State<SharedState>) -> Json<UpdatesResponse> {
     Json(state.updates.response())
+}
+
+/// `POST /api/v1/updates/apply[?dry_run=true]`
+///
+/// Ask the root helper to upgrade the packages the last check listed. Needs a token that grants
+/// `manage:updates` (never allowed in preview mode). `dry_run=true` only reports what would happen.
+/// A real request is answered `202 Accepted`: the outcome shows up in `GET /api/v1/updates`
+/// (`status` is `installing` meanwhile, then a `history` entry appears). Refused with `409` when
+/// there is nothing to apply, an apply is already running, or it is outside a maintenance window.
+pub async fn apply_updates(
+    State(state): State<SharedState>,
+    caller: Option<Extension<Caller>>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<(StatusCode, Json<ApplyResponse>), ApiError> {
+    let mut dry_run = false;
+    for (key, value) in &params {
+        match (key.as_str(), value.as_str()) {
+            ("dry_run", "true") => dry_run = true,
+            ("dry_run", "false") => dry_run = false,
+            ("dry_run", other) => {
+                return Err(bad_request(format!(
+                    "`dry_run` must be true or false (got `{other}`)"
+                )))
+            }
+            (other, _) => return Err(bad_request(format!("unknown query parameter `{other}`"))),
+        }
+    }
+    let caller = caller.map_or_else(|| "unknown".to_owned(), |Extension(c)| c.0);
+    let config = state.config.read().expect("config lock poisoned").clone();
+
+    match state.updates.request_apply(&config, &caller, dry_run) {
+        Ok(response) if dry_run => Ok((StatusCode::OK, Json(response))),
+        Ok(response) => {
+            state.logger.info(format!(
+                "audit: {caller} requested applying {} package(s) (request {})",
+                response.packages.len(),
+                response.id.as_deref().unwrap_or("-")
+            ));
+            Ok((StatusCode::ACCEPTED, Json(response)))
+        }
+        Err(ApplyRefusal::Conflict(reason)) => {
+            state
+                .logger
+                .warn(format!("audit: {caller} apply request refused: {reason}"));
+            Err(ApiError(ApiErrorBody::new(ErrorCode::Conflict, reason)))
+        }
+        Err(ApplyRefusal::Internal(message)) => {
+            state
+                .logger
+                .error(format!("audit: {caller} apply request failed: {message}"));
+            Err(ApiError(ApiErrorBody::new(
+                ErrorCode::Internal,
+                "could not hand the request to the update helper",
+            )))
+        }
+    }
 }

@@ -5,7 +5,7 @@
 #   3. re-running it never overwrites an edited config
 #   4. --uninstall keeps config and state, --purge removes them
 #
-# Needs release binaries: run `cargo build --release` first (or pass BIN_DIR=...).
+# Needs release binaries (aborad, abora, abora-apply): run `cargo build --release` first (or pass BIN_DIR=...).
 
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -18,8 +18,10 @@ fail() { echo "check-installer: FAIL: $*" >&2; exit 1; }
 if command -v systemd-analyze >/dev/null; then
     # verify checks that ExecStart exists, so point it at the real binary for the check
     sed "s#^ExecStart=/usr/sbin/aborad#ExecStart=$BIN_DIR/aborad#" "$ROOT/installer/systemd/aborad.service" > "$TMP/aborad.service"
+    sed "s#^ExecStart=/usr/sbin/abora-apply#ExecStart=$BIN_DIR/abora-apply#" "$ROOT/installer/systemd/abora-apply.service" > "$TMP/abora-apply.service"
+    cp "$ROOT/installer/systemd/abora-apply.path" "$TMP/abora-apply.path"
     # The aborad user does not exist on the build machine; that is the only complaint we accept.
-    out="$(systemd-analyze verify "$TMP/aborad.service" 2>&1 || true)"
+    out="$(systemd-analyze verify "$TMP/aborad.service" "$TMP/abora-apply.service" "$TMP/abora-apply.path" 2>&1 || true)"
     bad="$(printf '%s\n' "$out" | grep -v -E "Failed to resolve (user|group)|Unknown (user|group)|does not exist" || true)"
     [ -z "$bad" ] || fail "systemd-analyze verify: $bad"
     echo "ok   unit passes systemd-analyze verify"
@@ -34,7 +36,7 @@ echo "ok   unit keeps its hardening lines"
 # 2. staged install
 STAGE="$TMP/root"
 "$ROOT/installer/install.sh" --root "$STAGE" --bin-dir "$BIN_DIR" >/dev/null
-for f in usr/sbin/aborad usr/bin/abora etc/abora/abora.toml etc/systemd/system/aborad.service; do
+for f in usr/sbin/aborad usr/sbin/abora-apply usr/bin/abora etc/abora/abora.toml etc/systemd/system/aborad.service etc/systemd/system/abora-apply.service etc/systemd/system/abora-apply.path; do
     [ -e "$STAGE/$f" ] || fail "missing $f after install"
 done
 [ -x "$STAGE/usr/sbin/aborad" ] || fail "aborad is not executable"
@@ -52,7 +54,7 @@ echo "ok   re-install keeps an edited config"
 # 4. uninstall vs purge
 mkdir -p "$STAGE/var/lib/abora" && echo state > "$STAGE/var/lib/abora/updates.json"
 "$ROOT/installer/install.sh" --root "$STAGE" --uninstall >/dev/null
-[ ! -e "$STAGE/usr/sbin/aborad" ] && [ ! -e "$STAGE/etc/systemd/system/aborad.service" ] || fail "uninstall left binaries or the unit"
+[ ! -e "$STAGE/usr/sbin/aborad" ] && [ ! -e "$STAGE/usr/sbin/abora-apply" ] && [ ! -e "$STAGE/etc/systemd/system/aborad.service" ] && [ ! -e "$STAGE/etc/systemd/system/abora-apply.path" ] || fail "uninstall left binaries or units"
 [ -e "$STAGE/etc/abora/abora.toml" ] && [ -e "$STAGE/var/lib/abora/updates.json" ] || fail "uninstall removed config or state"
 "$ROOT/installer/install.sh" --root "$STAGE" --uninstall --purge >/dev/null
 [ ! -e "$STAGE/etc/abora" ] && [ ! -e "$STAGE/var/lib/abora" ] || fail "purge left config or state"

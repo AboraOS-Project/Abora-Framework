@@ -13,7 +13,7 @@
 #                   no ownership is changed, systemd is not touched)
 #
 # What it does, in order: creates the `aborad` system user (no login, no home), installs
-# aborad to /usr/sbin and abora to /usr/bin, installs the default config to
+# aborad and abora-apply to /usr/sbin and abora to /usr/bin, installs the default config to
 # /etc/abora/abora.toml ONLY if that file does not exist yet (your edits are never
 # overwritten), installs the hardened unit, reloads systemd and enables the service.
 # Running it again is safe.
@@ -55,17 +55,20 @@ BIN="$ROOT/usr/bin"
 ETC="$ROOT/etc/abora"
 UNIT_DIR="$ROOT/etc/systemd/system"
 UNIT="$UNIT_DIR/aborad.service"
+APPLY_UNIT="$UNIT_DIR/abora-apply.service"
+APPLY_PATH="$UNIT_DIR/abora-apply.path"
 
 systemd_present() { [ "$STAGING" = 0 ] && command -v systemctl >/dev/null && [ -d /run/systemd/system ]; }
 
 if [ "$ACTION" = uninstall ]; then
     if systemd_present; then
+        systemctl disable --now abora-apply.path 2>/dev/null || true
         systemctl disable --now aborad 2>/dev/null || true
     fi
-    rm -f "$SBIN/aborad" "$BIN/abora" "$UNIT"
+    rm -f "$SBIN/aborad" "$SBIN/abora-apply" "$BIN/abora" "$UNIT" "$APPLY_UNIT" "$APPLY_PATH"
     systemd_present && systemctl daemon-reload
     if [ "$PURGE" = 1 ]; then
-        rm -rf "$ETC" "$ROOT/var/lib/abora"
+        rm -rf "$ETC" "$ROOT/var/lib/abora" "$ROOT/var/lib/abora-apply"
         if [ "$STAGING" = 0 ] && getent passwd aborad >/dev/null; then userdel aborad 2>/dev/null || true; fi
         say "removed aborad, its unit, configuration, state and user"
     else
@@ -74,8 +77,8 @@ if [ "$ACTION" = uninstall ]; then
     exit 0
 fi
 
-[ -x "$BIN_DIR/aborad" ] && [ -x "$BIN_DIR/abora" ] \
-    || die "aborad and abora not found in $BIN_DIR; run 'cargo build --release' or pass --bin-dir"
+[ -x "$BIN_DIR/aborad" ] && [ -x "$BIN_DIR/abora" ] && [ -x "$BIN_DIR/abora-apply" ] \
+    || die "aborad, abora and abora-apply not found in $BIN_DIR; run 'cargo build --release' or pass --bin-dir"
 
 if [ "$STAGING" = 0 ]; then
     if ! getent passwd aborad >/dev/null; then
@@ -89,6 +92,7 @@ fi
 
 say "installing binaries"
 install -Dm755 "$BIN_DIR/aborad" "$SBIN/aborad"
+install -Dm755 "$BIN_DIR/abora-apply" "$SBIN/abora-apply"
 install -Dm755 "$BIN_DIR/abora" "$BIN/abora"
 
 say "installing configuration"
@@ -102,12 +106,15 @@ fi
 
 say "installing the systemd unit"
 install -Dm644 "$HERE/systemd/aborad.service" "$UNIT"
+install -Dm644 "$HERE/systemd/abora-apply.service" "$APPLY_UNIT"
+install -Dm644 "$HERE/systemd/abora-apply.path" "$APPLY_PATH"
 
 if systemd_present; then
     systemctl daemon-reload
-    systemctl enable aborad
+    systemctl enable aborad abora-apply.path
     if [ "$START" = 1 ]; then
         systemctl restart aborad
+        systemctl start abora-apply.path
         sleep 1
         systemctl --no-pager --lines=0 status aborad || true
     fi

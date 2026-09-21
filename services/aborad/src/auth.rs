@@ -24,14 +24,14 @@ use crate::tokens::TokenStore;
 /// A single privileged capability a handler requires. Every route must
 /// declare one; none may run without it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-// Every permission is a read today; `manage:*` permissions arrive with the first mutating route.
-#[allow(clippy::enum_variant_names)]
 pub enum Permission {
     ReadHealth,
     ReadVersion,
     ReadSystem,
     ReadServices,
     ReadUpdates,
+    /// Apply updates. Mutating: needs a token that names this permission explicitly.
+    ManageUpdates,
 }
 
 impl Permission {
@@ -43,17 +43,22 @@ impl Permission {
             Permission::ReadSystem => "read:system",
             Permission::ReadServices => "read:services",
             Permission::ReadUpdates => "read:updates",
+            Permission::ManageUpdates => "manage:updates",
         }
     }
 
-    /// Only read-only permissions exist in this milestone. Mutating
-    /// permissions (and the audit requirements that come with them) will be
-    /// added alongside real authenticated remote management.
-    #[allow(dead_code)]
+    /// Mutating permissions change the system. They are never available in
+    /// preview mode (no token store), are never covered by `read_all`, and
+    /// every use is logged with the caller's identity.
     pub const fn is_mutating(self) -> bool {
-        false
+        matches!(self, Permission::ManageUpdates)
     }
 }
+
+/// Who made a request, recorded by the authorization layer for the audit trail. For tokens this
+/// is the token's `name` (or a placeholder if it has none).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Caller(pub String);
 
 /// Why a request was (or was not) admitted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,6 +70,9 @@ pub enum Decision {
     AuthenticationRequired,
     /// Token authentic but does not grant the requested permission (`403`).
     InsufficientPermission,
+    /// A mutating operation was attempted but no token store is configured, so there is nobody
+    /// to authenticate (`403`). Preview-mode loopback trust never covers mutation.
+    TokensRequired,
 }
 
 /// Pure admission decision. The server passes `bearer` as parsed from the
@@ -81,8 +89,12 @@ pub fn authorize(
     }
 
     let Some(store) = store else {
-        // No token store: preview mode, loopback is trusted.
-        return Decision::Allowed;
+        // No token store: preview mode, loopback is trusted for reads only.
+        return if permission.is_mutating() {
+            Decision::TokensRequired
+        } else {
+            Decision::Allowed
+        };
     };
 
     let Some(bearer) = bearer else {
@@ -112,6 +124,13 @@ impl Decision {
                 abora_api::ErrorCode::Unauthorized,
                 format!(
                     "operation `{}` requires a valid bearer token",
+                    permission.permission_id()
+                ),
+            )),
+            Decision::TokensRequired => Some(ApiErrorBody::new(
+                abora_api::ErrorCode::Forbidden,
+                format!(
+                    "operation `{}` changes the system and requires token authentication; configure [security] token_file and use a token that grants it",
                     permission.permission_id()
                 ),
             )),
@@ -262,5 +281,55 @@ mod tests {
         assert!(Decision::Allowed
             .into_denial(Permission::ReadHealth)
             .is_none());
+    }
+
+    #[test]
+    fn read_all_never_grants_a_mutating_permission() {
+        let s = store("secret", &["read_all"]);
+        assert_eq!(
+            authorize(
+                LOOPBACK,
+                Permission::ManageUpdates,
+                Some("secret"),
+                Some(&s)
+            ),
+            Decision::InsufficientPermission
+        );
+        assert_eq!(
+            authorize(LOOPBACK, Permission::ReadUpdates, Some("secret"), Some(&s)),
+            Decision::Allowed
+        );
+    }
+
+    #[test]
+    fn a_mutating_permission_must_be_named_explicitly() {
+        let s = store("secret", &["manage:updates"]);
+        assert_eq!(
+            authorize(
+                LOOPBACK,
+                Permission::ManageUpdates,
+                Some("secret"),
+                Some(&s)
+            ),
+            Decision::Allowed
+        );
+        assert_eq!(
+            authorize(LOOPBACK, Permission::ReadUpdates, Some("secret"), Some(&s)),
+            Decision::InsufficientPermission,
+            "manage does not imply read"
+        );
+    }
+
+    #[test]
+    fn preview_mode_never_allows_mutation() {
+        assert_eq!(
+            authorize(LOOPBACK, Permission::ManageUpdates, None, None),
+            Decision::TokensRequired
+        );
+        assert_eq!(
+            authorize(LOOPBACK, Permission::ReadUpdates, None, None),
+            Decision::Allowed
+        );
+        assert!(!Permission::ReadUpdates.is_mutating() && Permission::ManageUpdates.is_mutating());
     }
 }

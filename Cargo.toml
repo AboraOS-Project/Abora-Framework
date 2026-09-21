@@ -9,6 +9,7 @@ members = [
     "crates/abora-api",
     "crates/abora-services",
     "services/aborad",
+    "services/abora-apply",
     "cli/abora",
     "boot/abora-boot",
 ]

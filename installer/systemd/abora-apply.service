@@ -1,0 +1,24 @@
+[Unit]
+Description=Abora Framework update helper (applies requested package updates)
+Documentation=https://github.com/AboraOS-Project/Abora-Framework
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/abora-apply --config /etc/abora/abora.toml
+# A large upgrade can take a while; the helper itself gives apt-get 30 minutes.
+TimeoutStartSec=45min
+
+# The result goes here: a root-owned directory that aborad (unprivileged) can only read.
+StateDirectory=abora-apply
+StateDirectoryMode=0755
+
+# This unit runs as root and installs packages, which needs wide write access, so it is sandboxed
+# much less than aborad. What it may do is limited by its code instead: it accepts one kind of
+# request (upgrade these packages), validates everything itself and refuses outside a maintenance
+# window. See docs/apply-design.md.
+ProtectHome=true
+PrivateTmp=true
+ProtectHostname=true
+ProtectClock=true
+RestrictRealtime=true
+LockPersonality=true

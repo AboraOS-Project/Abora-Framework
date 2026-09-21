@@ -34,46 +34,84 @@ pub trait CommandRunner: Send + Sync {
     fn run(&self, program: &str, args: &[&str]) -> Result<String, String>;
 }
 
-/// Runs real programs: no shell, `LC_ALL=C`, killed after [`COMMAND_TIMEOUT`].
-pub struct SystemRunner;
+/// Runs real programs: no shell, `LC_ALL=C`, killed after `timeout`. On failure the error
+/// carries the exit status and the tail of standard error (never standard input or the
+/// environment).
+pub struct SystemRunner {
+    timeout: Duration,
+}
+
+impl SystemRunner {
+    pub const fn new(timeout: Duration) -> Self {
+        Self { timeout }
+    }
+}
+
+impl Default for SystemRunner {
+    fn default() -> Self {
+        Self::new(COMMAND_TIMEOUT)
+    }
+}
+
+/// The last `max` bytes of `text`, cut on a character boundary.
+pub fn tail(text: &str, max: usize) -> &str {
+    if text.len() <= max {
+        return text.trim();
+    }
+    let mut start = text.len() - max;
+    while !text.is_char_boundary(start) {
+        start += 1;
+    }
+    text[start..].trim()
+}
 
 impl CommandRunner for SystemRunner {
     fn run(&self, program: &str, args: &[&str]) -> Result<String, String> {
         let mut child = Command::new(program)
             .args(args)
             .env("LC_ALL", "C")
+            .env("DEBIAN_FRONTEND", "noninteractive")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| format!("could not run {program}: {e}"))?;
-        let mut stdout = child.stdout.take().expect("stdout was piped");
-        let reader = std::thread::spawn(move || {
-            let mut out = String::new();
-            let _ = stdout.read_to_string(&mut out);
-            out
-        });
+        fn drain(mut pipe: impl Read + Send + 'static) -> std::thread::JoinHandle<String> {
+            std::thread::spawn(move || {
+                let mut out = String::new();
+                let _ = pipe.read_to_string(&mut out);
+                out
+            })
+        }
+        let out_reader = drain(child.stdout.take().expect("stdout was piped"));
+        let err_reader = drain(child.stderr.take().expect("stderr was piped"));
         let started = Instant::now();
         let status = loop {
             match child.try_wait() {
                 Ok(Some(status)) => break status,
-                Ok(None) if started.elapsed() > COMMAND_TIMEOUT => {
+                Ok(None) if started.elapsed() > self.timeout => {
                     let _ = child.kill();
                     let _ = child.wait();
                     return Err(format!(
                         "{program} timed out after {}s",
-                        COMMAND_TIMEOUT.as_secs()
+                        self.timeout.as_secs()
                     ));
                 }
                 Ok(None) => std::thread::sleep(Duration::from_millis(50)),
                 Err(e) => return Err(format!("waiting for {program}: {e}")),
             }
         };
-        let out = reader.join().unwrap_or_default();
+        let out = out_reader.join().unwrap_or_default();
+        let err = err_reader.join().unwrap_or_default();
         if status.success() {
             Ok(out)
-        } else {
+        } else if err.trim().is_empty() {
             Err(format!("{program} exited with {status}"))
+        } else {
+            Err(format!(
+                "{program} exited with {status}: {}",
+                tail(&err, 600)
+            ))
         }
     }
 }
@@ -90,7 +128,7 @@ pub struct PackageUpgrade {
 }
 
 /// Package names apt accepts: lowercase letters, digits and `+ - . :` (arch qualifier).
-fn valid_package_name(name: &str) -> bool {
+pub fn valid_package_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 200
         && !name.starts_with(['-', '.'])
@@ -178,7 +216,7 @@ impl HostPackageProvider {
     pub fn new(store: Arc<UpdateStore>) -> Self {
         Self::with_parts(
             store,
-            Box::new(SystemRunner),
+            Box::new(SystemRunner::default()),
             "/var/run/reboot-required".into(),
             abora_log::rfc3339_now,
         )

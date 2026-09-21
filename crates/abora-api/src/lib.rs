@@ -210,8 +210,27 @@ pub struct ScheduleInfo {
     /// Whether the server's local time is inside a maintenance window. Omitted if the time is unknown.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub in_maintenance_window: Option<bool>,
+    /// A requested apply (`POST /api/v1/updates/apply`) would be accepted now.
+    pub apply_permitted: bool,
     pub installs_permitted: bool,
     pub reboot_permitted: bool,
+}
+
+/// Body of `POST /api/v1/updates/apply`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ApplyResponse {
+    /// `true` when nothing was requested and this only describes what would happen.
+    pub dry_run: bool,
+    /// The request is (or, for a dry run, would be) accepted.
+    pub permitted: bool,
+    /// Why not, when `permitted` is false.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// Id of the accepted request (absent for a dry run). Its outcome appears in `history`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    /// The packages the last check listed, which is what would be (or was requested to be) upgraded.
+    pub packages: Vec<String>,
 }
 
 /// Body of `GET /api/v1/updates`.

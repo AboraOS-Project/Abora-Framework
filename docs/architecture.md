@@ -27,6 +27,7 @@ crates/
   abora-services Read-only service registry (systemd discovery).
 services/
   aborad         The framework daemon: HTTP API + auth, correlation-id, tracing layers.
+  abora-apply    Small root helper that applies update requests from aborad (see docs/apply-design.md).
 cli/
   abora          The command line client (talks to the loopback daemon only).
 config/          Shipped default configuration file.
@@ -68,8 +69,9 @@ See [docs/daemon-api.md](daemon-api.md) for the full reference.
 
 * Path prefix `/api/v1` (configurable via `[api] base_path`).
 * Read-only endpoints: `health`, `version`, `system`, `services`, `updates`.
-* `updates` reports what the read-only apt provider found (`abora-update`). Installing
-  updates is not implemented, and `status` is omitted rather than guessed before the first check.
+* `updates` reports what the apt provider found (`abora-update`); `status` is omitted rather than
+  guessed before the first check. `POST updates/apply` is the one mutating route: token-only, audited,
+  and it only hands a validated request to the root helper `abora-apply`.
 * Every route is guarded by a per-operation permission enforced in a
   middleware layer. Today only loopback clients are admitted.
 

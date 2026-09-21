@@ -27,6 +27,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "abora-apply"
+version = "0.1.0"
+dependencies = [
+ "abora-config",
+ "abora-log",
+ "abora-update",
+ "serde_json",
+]
+
+[[package]]
 name = "abora-boot"
 version = "0.1.0"
 

@@ -28,7 +28,7 @@ jobs:
       - run: cargo test --workspace --locked
       - name: Installer and systemd unit
         run: |
-          cargo build --release --locked -p aborad -p abora
+          cargo build --release --locked -p aborad -p abora -p abora-apply
           scripts/check-installer.sh
 
   iso:

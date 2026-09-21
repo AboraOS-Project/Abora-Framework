@@ -15,7 +15,7 @@ use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
 use axum::http::{HeaderName, HeaderValue, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, MethodRouter};
+use axum::routing::{get, post, MethodRouter};
 use axum::Router;
 use http_body_util::BodyExt;
 
@@ -76,6 +76,14 @@ pub fn build(state: SharedState) -> Router {
                 get(handlers::service_detail),
                 state.clone(),
                 Permission::ReadServices,
+            ),
+        )
+        .route(
+            &endpoint(&base_path, "updates/apply"),
+            with_auth(
+                post(handlers::apply_updates),
+                state.clone(),
+                Permission::ManageUpdates,
             ),
         )
         .route(
@@ -289,8 +297,20 @@ async fn authorize(
         } else {
             None
         };
-        auth::authorize(peer, permission, bearer, store)
+        let decision = auth::authorize(peer, permission, bearer, store);
+        // Who is asking, for the audit trail (only meaningful when a token authenticated).
+        let name = store
+            .zip(bearer)
+            .and_then(|(store, secret)| store.find(secret))
+            .map(|token| {
+                token
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| "unnamed token".to_owned())
+            });
+        (decision, name)
     };
+    let (decision, caller) = decision;
 
     match decision {
         Decision::Allowed => {
@@ -308,6 +328,10 @@ async fn authorize(
                     permission.permission_id()
                 );
             }
+            let mut req = req;
+            req.extensions_mut().insert(auth::Caller(
+                caller.unwrap_or_else(|| "loopback (no token)".to_owned()),
+            ));
             next.run(req).await
         }
         denied => {
@@ -829,5 +853,243 @@ mod tests {
                 assert_eq!(status, 200, "path: {path}");
             }
         }
+    }
+
+    // ---- POST /api/v1/updates/apply -------------------------------------------------------------
+
+    use abora_config::schedule::LocalTime;
+    use abora_update::host::CommandRunner;
+    use abora_update::{MaintenanceWindow, Weekday};
+    use std::path::PathBuf;
+
+    struct Canned;
+    impl CommandRunner for Canned {
+        fn run(&self, _program: &str, _args: &[&str]) -> Result<String, String> {
+            Ok(
+                "Inst openssl [1.0-1] (1.0-2 Ubuntu:24.04/noble-updates [amd64])\n\
+                Inst libc6 [2.0-1] (2.0-2 Ubuntu:24.04/noble-security [amd64])\n"
+                    .into(),
+            )
+        }
+    }
+
+    fn sunday_3am() -> Option<LocalTime> {
+        Some(LocalTime {
+            weekday: Weekday::Sunday,
+            minutes: 3 * 60,
+        })
+    }
+
+    fn sunday_noon() -> Option<LocalTime> {
+        Some(LocalTime {
+            weekday: Weekday::Sunday,
+            minutes: 12 * 60,
+        })
+    }
+
+    /// A router whose update state has already "found" two packages, with a Sunday 02:00-04:00
+    /// window and a fixed clock. Returns the scratch directory holding the request file.
+    fn apply_app(
+        name: &str,
+        tokens: Option<TokenStore>,
+        local: fn() -> Option<LocalTime>,
+    ) -> (Router, PathBuf) {
+        use abora_log::{Format, Level};
+        let dir =
+            std::env::temp_dir().join(format!("abora-apply-api-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut config = Config::default();
+        config.maintenance.enabled = true;
+        config.maintenance.windows = vec![MaintenanceWindow {
+            days: vec![Weekday::Sunday],
+            start: "02:00".into(),
+            end: "04:00".into(),
+            max_duration_minutes: None,
+        }];
+        let updates = crate::state::UpdatesState::with_runner(Box::new(Canned), dir.clone(), local);
+        assert_eq!(updates.refresh(&abora_update::Channel::Stable), Ok(2));
+        let logger = abora_log::Logger::builder()
+            .level(Level::Off)
+            .format(Format::Json)
+            .writer(Box::new(std::io::sink()))
+            .build();
+        let state = AppState::with_updates(config, logger, tokens, updates);
+        (build(state), dir)
+    }
+
+    fn post(uri: &str, token: Option<&str>) -> Request {
+        let mut req = request_with_peer_and_token(uri, IpAddr::V4(Ipv4Addr::LOCALHOST), token);
+        *req.method_mut() = axum::http::Method::POST;
+        req
+    }
+
+    async fn body_json(resp: Response) -> serde_json::Value {
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null)
+    }
+
+    #[tokio::test]
+    async fn preview_mode_never_allows_applying_updates() {
+        let (app, dir) = apply_app("preview", None, sunday_3am);
+        let resp = app
+            .oneshot(post("/api/v1/updates/apply", None))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 403);
+        let v = body_json(resp).await;
+        assert_eq!(v["error"]["code"], "forbidden");
+        assert!(
+            v["error"]["message"].as_str().unwrap().contains("token"),
+            "{v}"
+        );
+        assert!(
+            !dir.join("apply-request.json").exists(),
+            "nothing may be requested"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn read_all_cannot_apply_and_manage_cannot_read() {
+        let (app, dir) = apply_app("scopes", Some(token_store("rw", &["read_all"])), sunday_3am);
+        let resp = app
+            .oneshot(post("/api/v1/updates/apply", Some("rw")))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 403, "read_all covers read:* only");
+        assert!(!dir.join("apply-request.json").exists());
+
+        let (app, dir2) = apply_app(
+            "scopes2",
+            Some(token_store("m", &["manage:updates"])),
+            sunday_3am,
+        );
+        let resp = app
+            .oneshot(loopback_request_with_token("/api/v1/updates", "m"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 403, "manage does not imply read");
+        let _ = std::fs::remove_dir_all(dir);
+        let _ = std::fs::remove_dir_all(dir2);
+    }
+
+    #[tokio::test]
+    async fn a_dry_run_reports_the_plan_and_changes_nothing() {
+        let (app, dir) = apply_app(
+            "dry",
+            Some(token_store("m", &["manage:updates"])),
+            sunday_3am,
+        );
+        let resp = app
+            .oneshot(post("/api/v1/updates/apply?dry_run=true", Some("m")))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200);
+        let v = body_json(resp).await;
+        assert_eq!(v["dry_run"], true);
+        assert_eq!(v["permitted"], true);
+        assert_eq!(v["packages"], serde_json::json!(["libc6", "openssl"]));
+        assert!(v.get("id").is_none());
+        assert!(!dir.join("apply-request.json").exists());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn an_accepted_request_is_written_once_and_marks_the_update_as_installing() {
+        let (app, dir) = apply_app(
+            "accept",
+            Some(token_store("m", &["manage:updates", "read:updates"])),
+            sunday_3am,
+        );
+        let resp = app
+            .clone()
+            .oneshot(post("/api/v1/updates/apply", Some("m")))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 202);
+        let v = body_json(resp).await;
+        assert_eq!(v["permitted"], true);
+        let id = v["id"].as_str().unwrap().to_owned();
+        assert!(id.starts_with("apply-"));
+
+        // The request file is what the helper will validate: private, and naming only packages.
+        let path = dir.join("apply-request.json");
+        let request: abora_update::apply::ApplyRequest =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(request.id, id);
+        assert_eq!(request.requested_by, "test", "the token's name is recorded");
+        assert_eq!(request.packages, ["libc6", "openssl"]);
+        assert!(abora_update::apply::validate_request(&request).is_ok());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+
+        // While it is pending: the API says installing, and a second request is a conflict.
+        let resp = app
+            .clone()
+            .oneshot(loopback_request_with_token("/api/v1/updates", "m"))
+            .await
+            .unwrap();
+        assert_eq!(body_json(resp).await["status"]["state"], "installing");
+        let resp = app
+            .oneshot(post("/api/v1/updates/apply", Some("m")))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 409);
+        assert_eq!(body_json(resp).await["error"]["code"], "conflict");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn outside_a_window_apply_is_refused_and_a_dry_run_explains_why() {
+        let (app, dir) = apply_app(
+            "noon",
+            Some(token_store("m", &["manage:updates"])),
+            sunday_noon,
+        );
+        let resp = app
+            .clone()
+            .oneshot(post("/api/v1/updates/apply", Some("m")))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 409);
+        assert!(!dir.join("apply-request.json").exists());
+
+        let resp = app
+            .oneshot(post("/api/v1/updates/apply?dry_run=true", Some("m")))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200);
+        let v = body_json(resp).await;
+        assert_eq!(v["permitted"], false);
+        assert!(
+            v["reason"].as_str().unwrap().contains("maintenance window"),
+            "{v}"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn apply_rejects_unknown_or_bad_query_parameters() {
+        let (app, dir) = apply_app(
+            "query",
+            Some(token_store("m", &["manage:updates"])),
+            sunday_3am,
+        );
+        for uri in [
+            "/api/v1/updates/apply?dry_run=maybe",
+            "/api/v1/updates/apply?packages=evil",
+        ] {
+            let resp = app.clone().oneshot(post(uri, Some("m"))).await.unwrap();
+            assert_eq!(resp.status(), 400, "{uri}");
+        }
+        assert!(!dir.join("apply-request.json").exists());
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

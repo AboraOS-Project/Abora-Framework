@@ -42,6 +42,19 @@ user with:
 
 `systemd-analyze security` scores it **1.1 OK**.
 
+## The update helper
+
+Applying updates needs root, and `aborad` is deliberately not root. So a second, tiny program does it:
+
+* `abora-apply.path` watches `/var/lib/abora/apply-request.json` (which `aborad` writes).
+* `abora-apply.service` (root, one-shot) runs `abora-apply`. It validates the request itself,
+  refuses outside a maintenance window, runs one fixed `apt-get` command and writes its result to
+  `/var/lib/abora-apply/result.json` (root-owned; `aborad` can only read it).
+* It is sandboxed **much less** than `aborad`, because installing packages needs wide write access.
+  Its safety comes from what it will do: one kind of request, validated, policy re-checked.
+
+See [docs/apply-design.md](../docs/apply-design.md).
+
 ## How it was checked
 
 * `scripts/check-installer.sh` (also run in CI): the unit passes `systemd-analyze verify`, a
@@ -49,7 +62,10 @@ user with:
   `--purge` removes it. It needs no root and does not touch the system.
 * The daemon was run for real under this unit's sandbox options as a transient user service:
   health, the apt update check, the systemd service listing and state writing all worked.
-* **Not yet tested:** a real root install (`useradd`, `StateDirectory` ownership, `ProtectHome`)
+* The apply path was run end to end with a **fake `apt-get`** (real `aborad`, real systemd path unit, real helper):
+  request accepted, status `installing`, helper ran with the exact expected arguments, history entry
+  recorded, audit line logged, request file removed. No real package was installed.
+* **Not yet tested:** upgrading real packages, and a real root install (`useradd`, `StateDirectory` ownership, `ProtectHome`)
   on a clean machine. Try it in a VM or container before relying on it.
 
 ## Why no .deb/.rpm yet

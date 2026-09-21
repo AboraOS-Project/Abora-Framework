@@ -114,10 +114,19 @@ The policy:
 Windows are half-open (`start <= now < end`), per weekday, and never cross midnight. The local
 time comes from `date` (it honours `TZ`), because the standard library cannot ask.
 
+## Applying updates
+
+`POST /api/v1/updates/apply` (token with `manage:updates`) asks the separate root helper `abora-apply`
+to upgrade the packages the last check listed. `aborad` stays unprivileged: it only writes a request
+file, and a systemd path unit starts the helper. The helper re-checks the request, the maintenance
+window and what apt still lists, runs one fixed `apt-get install --only-upgrade --no-remove` command
+for the intersection, writes the result, and reboots only if the reboot policy allows it. The full
+design, its safety rules and how to test it are in [docs/apply-design.md](apply-design.md).
+
 ## Not implemented (honestly)
 
-* **Installing updates and rebooting.** `apply` is refused, so the scheduler only *reports*
-  what policy would permit (`installs_permitted`, `reboot_permitted`); it never acts on it.
+* **Automatic installs.** The scheduler only *reports* `installs_permitted`; nothing acts on it.
+  Applying is manual: `POST /api/v1/updates/apply` (see below).
 * Only the apt provider exists.
 
 ## Roadmap order
@@ -126,4 +135,4 @@ time comes from `date` (it honours `TZ`), because the standard library cannot as
 2. Provider: read-only `check`/`status`/`history` for apt. **Done.**
 3. Scheduler: poll + policy evaluation in `aborad`. **Done.**
 4. API: `GET /api/v1/updates`. **Done.**
-5. Apply: `apply()` + reboot orchestration behind `RebootPolicy`. Next.
+5. Apply: root helper + `POST /api/v1/updates/apply`, reboot behind `RebootPolicy`. **Done (manual).** Automatic apply is next.

@@ -20,6 +20,7 @@ machine-readable reference: [`crates/abora-api`](../crates/abora-api/src/lib.rs)
 | GET    | `/api/v1/system`      | implemented     |
 | GET    | `/api/v1/services`    | implemented (systemd) |
 | GET    | `/api/v1/updates`     | implemented (read-only, apt) |
+| POST   | `/api/v1/updates/apply` | implemented (token with `manage:updates` only) |
 
 All endpoints require loopback source addresses today (see
 [docs/security.md](security.md)). When `[security] token_file` is
@@ -170,14 +171,42 @@ the result. See [docs/update.md](update.md).
   guessed. `status.state` is `up_to_date`, `update_available`, `installing` or `error`
   (`error` carries a `message`, for example when `apt-get` is missing).
 * `schedule` is what the update policy permits at the moment it was last evaluated (about every 30 s; omitted
-  until the first evaluation). Installing is not implemented, so `installs_permitted` / `reboot_permitted` say what policy
-  *would* allow. See [docs/update.md](update.md#the-scheduler).
+  until the first evaluation). `apply_permitted` says a requested apply would be accepted now; `installs_permitted`
+  is about *automatic* installs, which are not implemented, so nothing acts on it. See
+  [docs/update.md](update.md#the-scheduler).
 * `reboot.required` reflects `/var/run/reboot-required`; `pending_since` and `reason` are set when known.
 * `available` is what the last check found (`size_bytes: 0` means unknown; the exact Debian
-  version is in `summary`). `history` is applied updates, newest first; it stays empty until
-  installing exists.
+  version is in `summary`). `history` is applied updates, newest first: one entry per
+  apply run, with the packages counted and any note in `note`.
 * State is kept in `[updates] state_file`. If that cannot be opened the daemon warns and keeps
   it in memory only.
+
+## `POST /api/v1/updates/apply`
+
+Ask for the packages the last check listed to be upgraded. **Changes the system**, so it needs a
+bearer token that grants `manage:updates`; it is refused in preview mode (no token file) and for
+`read_all` tokens (see [docs/security.md](security.md#mutating-permissions)).
+
+| Query | Meaning |
+|-------|---------|
+| `dry_run=true` | Only report what would happen. Nothing is requested. |
+
+```json
+{ "dry_run": false, "permitted": true, "id": "apply-a4f0f0137dfbdcc9",
+  "packages": ["libc6", "openssl"] }
+```
+
+* A real request answers **`202 Accepted`**: the work is done by a separate root helper
+  (`abora-apply`, see [docs/apply-design.md](apply-design.md)). Follow it in `GET /api/v1/updates`:
+  `status` is `installing` while it runs, then a `history` entry with the same `id` in its `note`
+  appears (about 30 s after it finishes).
+* A dry run answers `200` with `permitted` and, if not permitted, a `reason`.
+* **`409 conflict`** when nothing is available (check first), an apply is already running, or the
+  local time is outside a maintenance window (`[maintenance]` must be enabled and a window open;
+  `[updates] automatic` is not required).
+* `400` for an unknown query parameter or a bad `dry_run` value.
+* The request contains only package names taken from the last check; there is no way to pass a
+  command, path or option.
 
 ## Errors
 

@@ -1,0 +1,12 @@
+[Unit]
+Description=Watch for update requests from aborad
+Documentation=https://github.com/AboraOS-Project/Abora-Framework
+
+[Path]
+# aborad writes this file (atomically, by rename) to ask for the listed packages to be upgraded.
+# The start also fires when the helper deletes the file afterwards; it then finds no request and exits.
+PathChanged=/var/lib/abora/apply-request.json
+Unit=abora-apply.service
+
+[Install]
+WantedBy=multi-user.target

@@ -15,9 +15,10 @@
 //! secret_hash = "sha256:<64 hex chars>"
 //! ```
 //!
-//! The special permission `read_all` grants every permission and is the
-//! right choice for the local headless operator / platform agent that runs
-//! on the same host as the daemon.
+//! The special permission `read_all` grants every `read:*` permission and is
+//! the right choice for a local read-only operator or monitoring agent. It never
+//! grants a mutating permission: `manage:updates` (applying updates) must be
+//! named explicitly.
 
 #![forbid(unsafe_code)]
 
@@ -45,16 +46,17 @@ pub enum TokenStoreError {
 pub struct StoredToken {
     /// Optional human-readable label (audit logs).
     pub name: Option<String>,
-    /// Permission ids this token grants. `read_all` grants everything.
+    /// Permission ids this token grants. `read_all` grants every `read:*` permission.
     pub permissions: Vec<String>,
 }
 
 impl StoredToken {
-    /// Whether this token grants `permission_id` (or `read_all`).
+    /// Whether this token grants `permission_id`. `read_all` covers every `read:*` permission and
+    /// nothing else: mutating permissions (`manage:*`) must be named explicitly.
     pub fn grants(&self, permission_id: &str) -> bool {
         self.permissions
             .iter()
-            .any(|p| p == "read_all" || p == permission_id)
+            .any(|p| p == permission_id || (p == "read_all" && permission_id.starts_with("read:")))
     }
 }
 

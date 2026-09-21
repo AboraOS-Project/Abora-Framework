@@ -222,10 +222,21 @@ fn fingerprint(path: &Path) -> FileFingerprint {
 /// keeps update state in memory only, and says so.
 fn open_updates(config: &Config, logger: &Logger) -> UpdatesState {
     let path = &config.updates.state_file;
+    let request_file = path
+        .parent()
+        .map_or_else(|| PathBuf::from("."), PathBuf::from)
+        .join(abora_update::apply::REQUEST_FILE_NAME);
+    let host = |store: UpdateStore| {
+        UpdatesState::host(
+            Arc::new(store),
+            request_file.clone(),
+            config.updates.apply_result_file.clone(),
+        )
+    };
     match UpdateStore::open(path) {
         Ok((store, Opened::Loaded)) => {
             info!(logger, "update state loaded from {}", path.display());
-            UpdatesState::host(Arc::new(store))
+            host(store)
         }
         Ok((store, Opened::Fresh)) => {
             info!(
@@ -233,7 +244,7 @@ fn open_updates(config: &Config, logger: &Logger) -> UpdatesState {
                 "no update state at {} yet; starting empty",
                 path.display()
             );
-            UpdatesState::host(Arc::new(store))
+            host(store)
         }
         Ok((store, Opened::Recovered { backup })) => {
             warn!(
@@ -242,11 +253,11 @@ fn open_updates(config: &Config, logger: &Logger) -> UpdatesState {
                 path.display(),
                 backup.display()
             );
-            UpdatesState::host(Arc::new(store))
+            host(store)
         }
         Err(e) => {
             warn!(logger, "{e}; update history will not be saved");
-            UpdatesState::host(Arc::new(UpdateStore::in_memory()))
+            host(UpdateStore::in_memory())
         }
     }
 }

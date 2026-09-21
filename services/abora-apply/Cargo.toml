@@ -1,0 +1,22 @@
+[package]
+name = "abora-apply"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Root helper that applies host package updates on request from aborad"
+publish = false
+
+[[bin]]
+name = "abora-apply"
+path = "src/main.rs"
+
+[dependencies]
+abora-config = { path = "../../crates/abora-config" }
+abora-log = { path = "../../crates/abora-log" }
+abora-update = { path = "../../crates/abora-update" }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

@@ -5,7 +5,10 @@
 //!
 //! * **Checking** for updates is read-only and is never gated by windows; it just runs every
 //!   `[updates] check_interval`.
-//! * **Installing** is permitted only when `[updates] automatic` is on, `[maintenance] enabled`
+//! * **Applying an update on request** (`POST /api/v1/updates/apply`, by an authorized caller) needs
+//!   `[maintenance] enabled` and the local time inside a window, but not `automatic`: that switch is
+//!   only about installs nobody asked for.
+//! * **Installing** automatically is permitted only when `[updates] automatic` is on, `[maintenance] enabled`
 //!   is on, and the local time is inside one of the windows. No window means never.
 //! * **Rebooting** follows `[updates] reboot_policy`: `always` may reboot at any time, `never`
 //!   never does, and `ask` (the default) only inside a maintenance window.
@@ -14,6 +17,7 @@
 //! Windows are half-open (`start <= now < end`) and never cross midnight (validation requires
 //! `end > start`).
 
+use std::process::Command;
 use std::time::Duration;
 
 use abora_update::{MaintenanceWindow, RebootPolicy, Weekday};
@@ -33,8 +37,46 @@ pub struct LocalTime {
 pub struct Permissions {
     /// `None` when the local time is unknown.
     pub in_maintenance_window: Option<bool>,
+    /// A requested (manual) apply may run now: maintenance enforced and inside a window.
+    pub apply_permitted: bool,
+    /// Automatic installs may run now (also needs `[updates] automatic`).
     pub installs_permitted: bool,
     pub reboot_permitted: bool,
+}
+
+/// The server's local time, from `date` (which honours `TZ` and `/etc/localtime`; the standard
+/// library has no way to ask). `None` if it cannot be determined.
+pub fn local_time() -> Option<LocalTime> {
+    let out = Command::new("date")
+        .arg("+%u %H:%M")
+        .env("LC_ALL", "C")
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    parse_date_output(&String::from_utf8_lossy(&out.stdout))
+}
+
+/// Parse `date +"%u %H:%M"` output such as `7 03:15` (`%u` is 1 = Monday .. 7 = Sunday).
+pub fn parse_date_output(text: &str) -> Option<LocalTime> {
+    let (day, clock) = text.trim().split_once(' ')?;
+    let (hour, minute) = clock.split_once(':')?;
+    let weekday = match day {
+        "1" => Weekday::Monday,
+        "2" => Weekday::Tuesday,
+        "3" => Weekday::Wednesday,
+        "4" => Weekday::Thursday,
+        "5" => Weekday::Friday,
+        "6" => Weekday::Saturday,
+        "7" => Weekday::Sunday,
+        _ => return None,
+    };
+    let (hour, minute): (u32, u32) = (hour.parse().ok()?, minute.parse().ok()?);
+    (hour < 24 && minute < 60).then_some(LocalTime {
+        weekday,
+        minutes: hour * 60 + minute,
+    })
 }
 
 /// Whether `now` falls inside any window. Windows that do not parse are ignored (validation
@@ -55,6 +97,7 @@ pub fn permissions(config: &Config, now: Option<LocalTime>) -> Permissions {
     let in_win = in_maintenance_window == Some(true);
     Permissions {
         in_maintenance_window: now.map(|t| in_window(&config.maintenance.windows, t)),
+        apply_permitted: in_win,
         installs_permitted: config.updates.automatic && in_win,
         reboot_permitted: match config.updates.reboot_policy {
             RebootPolicy::Always => true,
@@ -213,6 +256,7 @@ mod tests {
             p,
             Permissions {
                 in_maintenance_window: None,
+                apply_permitted: false,
                 installs_permitted: false,
                 reboot_permitted: false
             }
@@ -255,5 +299,55 @@ mod tests {
         assert_eq!(check_interval(&c), Duration::from_secs(6 * 3600));
         c.updates.check_interval = "30m".into();
         assert_eq!(check_interval(&c), Duration::from_secs(1800));
+    }
+
+    #[test]
+    fn a_requested_apply_needs_a_window_but_not_the_automatic_switch() {
+        let w = vec![window(&[Weekday::Sunday], "02:00", "04:00")];
+        let inside = Some(at(Weekday::Sunday, 3, 0));
+        let outside = Some(at(Weekday::Sunday, 12, 0));
+        let manual_only = config(false, true, RebootPolicy::Ask, w.clone());
+        assert!(permissions(&manual_only, inside).apply_permitted);
+        assert!(
+            !permissions(&manual_only, inside).installs_permitted,
+            "automatic is still off"
+        );
+        assert!(!permissions(&manual_only, outside).apply_permitted);
+        assert!(
+            !permissions(&config(true, false, RebootPolicy::Ask, w), inside).apply_permitted,
+            "maintenance off"
+        );
+        assert!(
+            !permissions(&config(true, true, RebootPolicy::Ask, vec![]), inside).apply_permitted,
+            "no windows"
+        );
+        assert!(
+            !permissions(&manual_only, None).apply_permitted,
+            "unknown time"
+        );
+    }
+
+    #[test]
+    fn date_output_is_parsed() {
+        assert_eq!(
+            parse_date_output("7 03:15\n"),
+            Some(at(Weekday::Sunday, 3, 15))
+        );
+        assert_eq!(
+            parse_date_output("1 00:00"),
+            Some(at(Weekday::Monday, 0, 0))
+        );
+        for bad in [
+            "",
+            "0 01:00",
+            "8 01:00",
+            "3 25:00",
+            "3 12:60",
+            "Tue 10:00",
+            "3",
+            "3 10-30",
+        ] {
+            assert_eq!(parse_date_output(bad), None, "{bad:?}");
+        }
     }
 }

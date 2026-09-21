@@ -33,6 +33,8 @@ check_interval = "6h"
 reboot_policy = "ask"
 # Where update history and state are kept (absolute path; restart to change).
 state_file = "/var/lib/abora/updates.json"
+# Where the root update helper (abora-apply) writes the outcome of an apply. Absolute path.
+apply_result_file = "/var/lib/abora-apply/result.json"
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------

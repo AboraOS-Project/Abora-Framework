@@ -107,7 +107,22 @@ backdoor around the bind boundary.
 | `read:system`  | `GET /api/v1/system`  |
 | `read:services`| `GET /api/v1/services`, `GET /api/v1/services/{name}`|
 | `read:updates` | `GET /api/v1/updates` |
-| `read_all`     | all of the above      |
+| `manage:updates` | `POST /api/v1/updates/apply` (**changes the system**) |
+| `read_all`     | every `read:*` permission. **Never** a `manage:*` one |
+
+### Mutating permissions
+
+`manage:*` permissions change the system, so they are stricter than reads:
+
+* **Tokens only.** With no token file configured (preview mode) they are refused even for loopback
+  clients (`403`). Loopback trust never covers a change.
+* **Named explicitly.** `read_all` does not include them, and a `manage:updates` token cannot read.
+  Give an operator both `manage:updates` and `read:updates` if they need both.
+* **Audited.** Every request and refusal is logged with the token's `name`
+  (`audit: <name> requested applying N package(s) (request <id>)`).
+* **Not trusted downstream.** `aborad` cannot install anything itself; it only writes a request file
+  for the separate root helper, which re-validates the request and the maintenance policy on its
+  own (see [docs/apply-design.md](apply-design.md)).
 
 ## Reporting a vulnerability
 
