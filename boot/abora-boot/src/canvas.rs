@@ -76,18 +76,8 @@ impl Canvas {
         }
     }
 
-    pub fn vertical_gradient(&mut self, top: Rgb, bottom: Rgb) {
-        for y in 0..self.height {
-            let mix = |a: u8, b: u8| ((a as i32 * (self.height - 1 - y) as i32 + b as i32 * y as i32) / (self.height.max(2) - 1) as i32) as u8;
-            let c = Rgb(mix(top.0, bottom.0), mix(top.1, bottom.1), mix(top.2, bottom.2));
-            for x in 0..self.width {
-                self.put(x, y, c);
-            }
-        }
-    }
-
     pub fn text(&mut self, font: &Font, scale: usize, x: usize, y: usize, text: &str, color: Rgb) {
-        let (cw, ch) = (font.width() * scale, font.height() * scale);
+        let cw = font.width() * scale;
         let mut px = x;
         for c in text.chars() {
             if px + cw > self.width {
@@ -103,7 +93,6 @@ impl Canvas {
             }
             px += cw;
         }
-        let _ = ch;
     }
 
     /// Draw `logo` scaled (bilinear) into a `w`x`h` box, alpha-blended over what is there.

@@ -24,19 +24,17 @@ printf 'x\033[2J\033[H\033[?25l' > /dev/tty1 2>/dev/null
 
 mkfifo /run/boot.fifo
 VERSION="$(cat /etc/abora-version 2>/dev/null)"
-abora-boot --version-text "Live ISO  -  $VERSION" &
+abora-boot &
 BOOT_PID=$!
 
 # Report one line to the boot screen (which also echoes it to the serial console).
 say() {
     if kill -0 "$BOOT_PID" 2>/dev/null; then echo "$*" > /run/boot.fifo; else echo "$*"; fi
 }
-step() { say "@status $*"; }
 ok()   { say "[ OK ] $*"; }
 warn() { say "[WARN] $*"; }
 fail() { say "[FAIL] $*"; }
 
-step "Preparing the system"
 sleep 1   # let the boot screen open the framebuffer and read the kernel log
 ok "mounted /proc, /sys, /dev and tmpfs on /run and /tmp"
 
@@ -45,7 +43,6 @@ ok "hostname set to abora"
 
 ip link set lo up 2>/dev/null && ok "loopback network is up (127.0.0.1)" || warn "could not bring up loopback"
 
-step "Checking configuration"
 if abora config check /etc/abora/abora.toml >/run/check.out 2>&1; then
     ok "configuration /etc/abora/abora.toml is valid"
 else
@@ -53,7 +50,6 @@ else
     while read -r l; do say "       $l"; done < /run/check.out
 fi
 
-step "Starting aborad"
 say "[ .. ] starting aborad $VERSION"
 # aborad logs JSON lines; show them as "[ OK ] aborad: message" (or [WARN]).
 aborad_log() {
@@ -73,7 +69,6 @@ aborad_log() {
 }
 ( aborad --config /etc/abora/abora.toml 2>&1 | aborad_log ) &
 
-step "Waiting for the daemon API"
 tries=0
 until abora status --url http://127.0.0.1:7360 >/run/status.out 2>&1; do
     tries=$((tries + 1))
@@ -83,14 +78,11 @@ done
 if [ "$tries" -lt 25 ]; then
     ok "aborad answers on http://127.0.0.1:7360"
     while read -r l; do say "       $l"; done < /run/status.out
-    step "aborad is running - Abora Framework is up"
 else
     fail "aborad did not answer"
     while read -r l; do say "       $l"; done < /run/status.out
-    step "aborad did not start"
 fi
 
-say "@done"
 say "Boot finished. Serial console: type 'abora status', 'poweroff' or 'reboot'."
 
 # Interactive shell on the serial console. If there is no console input (for

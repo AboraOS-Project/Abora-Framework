@@ -2,8 +2,8 @@
 
 `make iso` builds `build/abora-framework.iso`, a small bootable image that runs the
 Abora Framework in RAM. `make run` boots it in QEMU: the **Abora logo** is drawn on
-the screen and the **boot logs** (kernel messages, then each init step, then
-`aborad`'s own log) scroll underneath it live.
+the right of the screen and the **boot log** (kernel messages, then each init step, then
+`aborad`'s own log) scrolls as plain text beside it, the same text you see on the serial console.
 
 ![The boot screen](img/iso-boot.png)
 
@@ -14,7 +14,7 @@ the screen and the **boot logs** (kernel messages, then each init step, then
 | Bootloader | [Limine](https://limine-bootloader.org) (BIOS and UEFI), fetched into `build/limine` on first build |
 | Kernel | Ubuntu's generic Linux kernel (`apt-get download`, kernel image only, cached in `build/kernel`), or your own via `KERNEL=/path/to/vmlinuz` |
 | Userspace | one initramfs: busybox (static), `aborad`, `abora`, `abora-boot`, `config/abora.toml.default` |
-| Boot screen | `boot/abora-boot`: draws `assets/abora-logo.png` and the log panel through `/dev/fb0` (no `unsafe`, no dependencies) |
+| Boot screen | `boot/abora-boot`: draws the plain-text log and `assets/abora-logo.png` through `/dev/fb0` (no `unsafe`, no dependencies) |
 | Font | Terminus 8x16 from the system's console fonts (SIL OFL 1.1) |
 
 `aborad`, `abora` and `abora-boot` are built statically (`+crt-static`, glibc) so
@@ -44,8 +44,8 @@ for QEMU: `ABORA_QEMU_MEM`, `ABORA_UEFI=1` (needs OVMF firmware).
 * Limine sets a 1280x800 framebuffer; the kernel's `simpledrm` driver exposes it as `/dev/fb0`.
 * The kernel console is the **serial port only** (`console=ttyS0`), so kernel text never
   scribbles over the logo. `abora-boot` reads the kernel log from `/dev/kmsg` itself.
-* `iso/init` reports each step by writing to `/run/boot.fifo`; `abora-boot` draws them
-  (`[ OK ]` green, `[WARN]` amber, `[FAIL]` red) and echoes them to the serial console.
+* `iso/init` reports each step by writing a line to `/run/boot.fifo`; `abora-boot` draws it
+  and echoes it to the serial console. To add a boot step, add a line to `iso/init`.
 * Because nothing prints to the virtual terminal, the display driver would never do its
   first mode set. `init` writes one glyph to `tty1` to make that happen (see the comment there).
 

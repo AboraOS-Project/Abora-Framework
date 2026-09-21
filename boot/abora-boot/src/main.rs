@@ -1,15 +1,13 @@
 //! Boot screen for the Abora Framework live ISO.
 //!
-//! Runs from the initramfs as a background process. It paints the Abora logo on
-//! the framebuffer and, underneath, a scrolling log fed by two sources:
+//! Runs from the initramfs in the background. It shows the boot log as plain
+//! text on the framebuffer, with the Abora logo on the right. The log has two
+//! sources:
 //!
 //! * the kernel ring buffer (`/dev/kmsg`), and
 //! * lines written to a FIFO by the init script (`echo "text" > /run/boot.fifo`).
 //!
-//! Special FIFO lines: `@status <text>` sets the status line, `@done` marks boot
-//! finished (the screen stays as it is). Everything is also echoed to stdout so
-//! a serial console sees the same log.
-//!
+//! Init lines are also echoed to stdout so the serial console shows the same log.
 //! No `unsafe` and no dependencies: the framebuffer is described by sysfs and
 //! written through the ordinary file API.
 
@@ -29,18 +27,9 @@ use std::time::Duration;
 use canvas::{Canvas, Rgb};
 use font::Font;
 
-const BACKGROUND_TOP: Rgb = Rgb(0x0B, 0x0E, 0x1A);
-const BACKGROUND_BOTTOM: Rgb = Rgb(0x16, 0x1B, 0x33);
-const TITLE: Rgb = Rgb(0xF2, 0xF4, 0xFF);
-const MUTED: Rgb = Rgb(0x8A, 0x92, 0xB8);
-const KERNEL: Rgb = Rgb(0x7B, 0x84, 0xAE);
-const INFO: Rgb = Rgb(0xC9, 0xCF, 0xEA);
-const OK: Rgb = Rgb(0x5C, 0xD6, 0x8A);
-const WARN: Rgb = Rgb(0xF2, 0xB8, 0x4B);
-const FAIL: Rgb = Rgb(0xF2, 0x6B, 0x6B);
-const ACCENT: Rgb = Rgb(0x6C, 0x7A, 0xE0);
-
-const MAX_LINES: usize = 400;
+const BACKGROUND: Rgb = Rgb(0, 0, 0);
+const TEXT: Rgb = Rgb(0xD0, 0xD0, 0xD0);
+const MAX_LINES: usize = 500;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Source {
@@ -50,8 +39,6 @@ enum Source {
 
 enum Event {
     Line(Source, String),
-    Status(String),
-    Done,
 }
 
 struct Args {
@@ -59,7 +46,6 @@ struct Args {
     logo: PathBuf,
     font: PathBuf,
     fb: String,
-    version: String,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -68,7 +54,6 @@ fn parse_args() -> Result<Args, String> {
         logo: "/usr/share/abora/logo.rgba".into(),
         font: "/usr/share/abora/font.psf".into(),
         fb: "fb0".into(),
-        version: String::new(),
     };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
@@ -78,9 +63,8 @@ fn parse_args() -> Result<Args, String> {
             "--logo" => args.logo = value("--logo")?.into(),
             "--font" => args.font = value("--font")?.into(),
             "--fb" => args.fb = value("--fb")?,
-            "--version-text" => args.version = value("--version-text")?,
             "--help" | "-h" => {
-                println!("usage: abora-boot [--fifo PATH] [--logo FILE] [--font FILE] [--fb fb0] [--version-text TEXT]");
+                println!("usage: abora-boot [--fifo PATH] [--logo FILE] [--font FILE] [--fb fb0]");
                 std::process::exit(0);
             }
             other => return Err(format!("unknown argument `{other}`")),
@@ -128,143 +112,64 @@ fn spawn_fifo(path: PathBuf, tx: Sender<Event>) {
             return;
         };
         for line in BufReader::new(file).lines().map_while(Result::ok) {
-            let event = if let Some(text) = line.strip_prefix("@status ") {
-                Event::Status(text.to_owned())
-            } else if line == "@done" {
-                Event::Done
-            } else {
-                Event::Line(Source::Init, line)
-            };
-            if tx.send(event).is_err() {
+            if tx.send(Event::Line(Source::Init, line)).is_err() {
                 return;
             }
         }
     });
 }
 
-fn line_color(source: Source, text: &str) -> Rgb {
-    if source == Source::Kernel {
-        return KERNEL;
-    }
-    let t = text.trim_start();
-    if t.starts_with("[ OK") || t.starts_with("[ok") {
-        OK
-    } else if t.starts_with("[WARN") {
-        WARN
-    } else if t.starts_with("[FAIL") {
-        FAIL
-    } else {
-        INFO
-    }
-}
-
 struct Screen {
     canvas: Canvas,
     font: Font,
-    scale: usize,
-    panel_x: usize,
-    panel_y: usize,
-    panel_w: usize,
-    panel_h: usize,
-    status_y: usize,
-    lines: VecDeque<(Rgb, String)>,
-    status: String,
-    done: bool,
+    /// Left edge, top edge, width and height of the text area (the logo sits to its right).
+    x: usize,
+    y: usize,
+    w: usize,
+    h: usize,
+    lines: VecDeque<String>,
 }
 
 impl Screen {
-    fn new(mut canvas: Canvas, font: Font, logo: Option<logo::Logo>, version: &str) -> Self {
+    fn new(mut canvas: Canvas, font: Font, logo: Option<logo::Logo>) -> Self {
         let (w, h) = (canvas.width(), canvas.height());
-        canvas.vertical_gradient(BACKGROUND_TOP, BACKGROUND_BOTTOM);
-        let scale = if h >= 900 { 2 } else { 1 };
-        let (cw, ch) = (font.width() * scale, font.height() * scale);
-
-        // Header: logo on the left, product name beside it.
-        let logo_size = (h / 5).clamp(96, 200);
-        let margin = (w / 24).max(16);
-        let top = margin;
+        canvas.fill_rect(0, 0, w, h, BACKGROUND);
+        let margin = 16;
+        let mut text_w = w - 2 * margin;
         if let Some(logo) = &logo {
-            canvas.blit_scaled(logo, margin, top, logo_size, logo_size);
+            let size = (h / 3).clamp(96, 320).min(w / 3);
+            canvas.blit_scaled(logo, w - margin - size, margin, size, size);
+            text_w = w - 3 * margin - size;
         }
-        let text_x = margin + logo_size + margin / 2;
-        let title_scale = scale * 3;
-        canvas.text(&font, title_scale, text_x, top + logo_size / 2 - font.height() * title_scale, "Abora Framework", TITLE);
-        let sub_y = top + logo_size / 2 + font.height() * scale / 2;
-        canvas.text(&font, scale, text_x, sub_y, "The shared server foundation behind Abora Cloud and Abora Atlas", MUTED);
-        if !version.is_empty() {
-            canvas.text(&font, scale, text_x, sub_y + ch + 4, version, ACCENT);
-        }
-
-        let rule_y = top + logo_size + margin / 2;
-        canvas.fill_rect(margin, rule_y, w - 2 * margin, 2, ACCENT);
-
-        let status_h = ch + 8;
-        let panel_y = rule_y + margin / 2 + 2;
-        let panel_h = h.saturating_sub(panel_y + margin + status_h);
-        let panel_w = w - 2 * margin;
-        let status_y = panel_y + panel_h + 6;
-        let _ = cw;
-        let mut screen = Self {
-            canvas,
-            font,
-            scale,
-            panel_x: margin,
-            panel_y,
-            panel_w,
-            panel_h,
-            status_y,
-            lines: VecDeque::new(),
-            status: String::from("Starting"),
-            done: false,
-        };
-        screen.canvas.flush_all();
-        screen
+        canvas.flush_all();
+        Self { canvas, font, x: margin, y: margin, w: text_w, h: h - 2 * margin, lines: VecDeque::new() }
     }
 
-    fn rows(&self) -> usize {
-        self.panel_h / (self.font.height() * self.scale)
-    }
-
-    fn cols(&self) -> usize {
-        self.panel_w / (self.font.width() * self.scale)
-    }
-
-    fn push(&mut self, color: Rgb, text: &str) {
-        let cols = self.cols().max(8);
-        let text: String = text.chars().map(|c| if c == '\t' { ' ' } else { c }).collect();
-        let mut chars: Vec<char> = text.chars().collect();
+    fn push(&mut self, text: &str) {
+        let cols = (self.w / self.font.width()).max(8);
+        let chars: Vec<char> = text.chars().map(|c| if c == '\t' { ' ' } else { c }).collect();
         if chars.is_empty() {
-            chars.push(' ');
+            self.lines.push_back(String::new());
         }
         for (i, chunk) in chars.chunks(cols).enumerate() {
             let s: String = chunk.iter().collect();
-            self.lines.push_back((color, if i == 0 { s } else { format!("  {s}") }));
+            self.lines.push_back(if i == 0 { s } else { format!("  {s}") });
         }
         while self.lines.len() > MAX_LINES {
             self.lines.pop_front();
         }
     }
 
+    /// Redraw the text area (only the last lines that fit) and send it to the screen.
     fn draw(&mut self) {
-        let (cw, ch) = (self.font.width() * self.scale, self.font.height() * self.scale);
-        // Panel background: a slightly lighter card.
-        self.canvas.fill_rect(self.panel_x, self.panel_y, self.panel_w, self.panel_h, Rgb(0x0F, 0x13, 0x24));
-        let rows = self.rows();
+        let ch = self.font.height();
+        self.canvas.fill_rect(self.x, self.y, self.w, self.h, BACKGROUND);
+        let rows = self.h / ch;
         let skip = self.lines.len().saturating_sub(rows);
-        for (row, (color, text)) in self.lines.iter().skip(skip).enumerate() {
-            let y = self.panel_y + row * ch;
-            self.canvas.text(&self.font, self.scale, self.panel_x + cw / 2, y, text, *color);
+        for (row, text) in self.lines.iter().skip(skip).enumerate() {
+            self.canvas.text(&self.font, 1, self.x, self.y + row * ch, text, TEXT);
         }
-        // Status line.
-        let bar = self.panel_w;
-        self.canvas.fill_rect(self.panel_x, self.status_y, bar, ch + 4, Rgb(0x0B, 0x0E, 0x1A));
-        let (label, color) = if self.done { ("READY", OK) } else { ("BOOTING", WARN) };
-        self.canvas.text(&self.font, self.scale, self.panel_x + cw / 2, self.status_y + 2, label, color);
-        let status = self.status.clone();
-        self.canvas.text(&self.font, self.scale, self.panel_x + cw * 10, self.status_y + 2, &status, INFO);
-        let top = self.panel_y;
-        let bottom = self.status_y + ch + 4;
-        self.canvas.flush_rows(top, bottom);
+        self.canvas.flush_rows(self.y, self.y + self.h);
     }
 }
 
@@ -272,67 +177,41 @@ fn run() -> Result<(), String> {
     let args = parse_args()?;
     let font = Font::load(&args.font).map_err(|e| format!("font {}: {e}", args.font.display()))?;
 
-    // Without a framebuffer there is nothing to draw; keep echoing so the
-    // serial log is still complete. (No framebuffer is normal with -nographic.)
-    let canvas = Canvas::open(&args.fb);
     let (tx, rx) = channel();
     spawn_fifo(args.fifo.clone(), tx.clone());
     spawn_kmsg(tx);
 
-    let mut screen = match canvas {
-        Ok(c) => {
+    // Without a framebuffer (for example `-nographic`) keep echoing to the
+    // serial console so its log is still complete.
+    let mut screen = match Canvas::open(&args.fb) {
+        Ok(canvas) => {
             let logo = logo::Logo::load(&args.logo).map_err(|e| eprintln!("abora-boot: logo: {e}")).ok();
-            Some(Screen::new(c, font, logo, &args.version))
+            Some(Screen::new(canvas, font, logo))
         }
         Err(e) => {
             eprintln!("abora-boot: no framebuffer ({e}); logging to the console only");
             None
         }
     };
-    if let Some(s) = screen.as_mut() {
-        s.draw();
-    }
 
     loop {
-        let mut dirty = false;
-        match rx.recv_timeout(Duration::from_millis(200)) {
-            Ok(event) => {
-                let mut pending = vec![event];
-                pending.extend(rx.try_iter().take(500));
-                for event in pending {
-                    match event {
-                        Event::Line(source, text) => {
-                            // The kernel already prints its own log on the serial console.
-                            if source == Source::Init {
-                                println!("{text}");
-                            }
-                            if let Some(s) = screen.as_mut() {
-                                s.push(line_color(source, &text), &text);
-                                dirty = true;
-                            }
-                        }
-                        Event::Status(text) => {
-                            if let Some(s) = screen.as_mut() {
-                                s.status = text;
-                                dirty = true;
-                            }
-                        }
-                        Event::Done => {
-                            if let Some(s) = screen.as_mut() {
-                                s.done = true;
-                                dirty = true;
-                            }
-                        }
-                    }
-                }
-            }
-            Err(RecvTimeoutError::Timeout) => {}
+        let first = match rx.recv_timeout(Duration::from_millis(200)) {
+            Ok(event) => event,
+            Err(RecvTimeoutError::Timeout) => continue,
             Err(RecvTimeoutError::Disconnected) => return Ok(()),
-        }
-        if dirty {
-            if let Some(s) = screen.as_mut() {
-                s.draw();
+        };
+        // Batch whatever else is already waiting so a burst redraws once.
+        for Event::Line(source, text) in std::iter::once(first).chain(rx.try_iter().take(500)) {
+            // The kernel already prints its own log on the serial console.
+            if source == Source::Init {
+                println!("{text}");
             }
+            if let Some(screen) = screen.as_mut() {
+                screen.push(&text);
+            }
+        }
+        if let Some(screen) = screen.as_mut() {
+            screen.draw();
         }
     }
 }
@@ -356,12 +235,5 @@ mod tests {
         let rec = "6,339,5140900,-;NET: Registered PF_INET\n SUBSYSTEM=net\n";
         assert_eq!(parse_kmsg(rec).unwrap(), "[    5.140] NET: Registered PF_INET");
         assert!(parse_kmsg("garbage").is_none());
-    }
-
-    #[test]
-    fn init_lines_are_coloured_by_their_tag() {
-        assert_eq!(line_color(Source::Init, "[ OK ] mounted"), OK);
-        assert_eq!(line_color(Source::Init, "[FAIL] nope"), FAIL);
-        assert_eq!(line_color(Source::Kernel, "[ OK ] x"), KERNEL);
     }
 }
