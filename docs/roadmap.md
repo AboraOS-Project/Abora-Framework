@@ -13,7 +13,7 @@ sysinfo, API skeleton, read-only daemon, CLI, docs).
 - [x] Config reload (SIGHUP) and config file watching.
 - [ ] Structured panic/log-of-record wiring (already partially in place).
 - [x] Live ISO (`make iso` / `make run`): Limine + Linux + `aborad`, with the Abora logo and boot logs on screen.
-- [ ] CI pipeline: fmt + clippy + test on push; `ABORA_BUILD_COMMIT` stamped builds.
+- [x] CI pipeline (`.github/workflows/ci.yml`): fmt + clippy + test, live-ISO boot test; `ABORA_BUILD_COMMIT` stamped builds. Not yet run on GitHub.
 
 ## Milestone 2 — updates
 

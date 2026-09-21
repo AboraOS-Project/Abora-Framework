@@ -71,6 +71,8 @@ fi
 [ -x "$LIMINE_DIR/limine" ] || { say "building limine host utility"; make -C "$LIMINE_DIR" >/dev/null; }
 
 # --- Abora binaries ----------------------------------------------------------
+# Stamp the commit into aborad's version endpoint (CI sets it already).
+export ABORA_BUILD_COMMIT="${ABORA_BUILD_COMMIT:-$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || true)}"
 say "building aborad, abora and abora-boot (static, release)"
 ( cd "$ROOT" && RUSTFLAGS="${RUSTFLAGS:-} -C target-feature=+crt-static" \
     cargo build --release --locked --target "$TARGET" -p aborad -p abora -p abora-boot )
