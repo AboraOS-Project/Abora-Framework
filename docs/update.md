@@ -35,6 +35,22 @@ and the API endpoint returns `501`.
 All types serialize, so they can travel over the daemon API once endpoints
 exist.
 
+## Persistent state (`UpdateStore`)
+
+`abora_update::UpdateStore` keeps what must survive a restart: the update history (newest
+500 entries), when the source was last checked, and whether a reboot is pending. It is one
+JSON file (the caller picks the path; the intended default is `/var/lib/abora/updates.json`).
+
+* Writes are atomic (temp file, `fsync`, rename) and the file is mode `0600`.
+* A change only becomes visible in memory after it is safely on disk; a failed save leaves
+  the state as it was and returns the error.
+* A file that does not parse is moved to `updates.json.corrupt` and the store starts empty
+  (`Opened::Recovered`). A file from a newer schema is refused, never overwritten.
+* Timestamps come from the caller, so the store has no clock.
+
+It is not connected to the daemon yet: the provider and scheduler (next roadmap items) will
+own one and `GET /api/v1/updates` will read from it.
+
 ## The `UpdateProvider` trait
 
 ```rust
