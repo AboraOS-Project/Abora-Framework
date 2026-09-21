@@ -3,7 +3,11 @@
 # `make iso` builds a bootable live ISO; `make run` boots it in QEMU and shows
 # the Abora logo with the boot logs. The scripts in scripts/ do the work.
 
-.PHONY: fork-check all iso run run-headless boot-test screenshot build test clean distclean help
+## test-apply    Test applying updates against real apt in a throwaway Docker container
+test-apply:
+	@scripts/test-apply-docker.sh
+
+.PHONY: test-apply fork-check all iso run run-headless boot-test screenshot build test clean distclean help
 
 all: iso
 

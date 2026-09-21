@@ -21,7 +21,7 @@ sysinfo, API skeleton, read-only daemon, CLI, docs).
 - [x] A real `UpdateProvider` implementation: `HostPackageProvider` (apt, read-only check; `apply` still refused).
 - [x] Poll scheduler (`scheduler.rs` + `abora_config::schedule`): checks every `check_interval`; reports what `[maintenance]` windows, `automatic` and `reboot_policy` permit. Nothing is installed yet.
 - [x] `GET /api/v1/updates` (status / available / reboot / history) replacing the `501`; checks run at startup and every `check_interval`.
-- [x] **Applying updates**, manual first: root helper `abora-apply`, token-only `POST /api/v1/updates/apply` (with `dry_run`), reboot only when policy allows. Verified end to end with a fake `apt-get`; not yet run against real packages in a VM. Automatic apply is not implemented. See [apply-design.md](apply-design.md).
+- [x] **Applying updates**, manual first: root helper `abora-apply`, token-only `POST /api/v1/updates/apply` (with `dry_run`), reboot only when policy allows. Verified against real apt in a throwaway Docker container (`make test-apply`, also in CI); not yet in a full VM with systemd driving it. Automatic apply is not implemented. See [apply-design.md](apply-design.md).
 
 ## Milestone 3 — platform consumers
 

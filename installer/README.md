@@ -65,7 +65,9 @@ See [docs/apply-design.md](../docs/apply-design.md).
 * The apply path was run end to end with a **fake `apt-get`** (real `aborad`, real systemd path unit, real helper):
   request accepted, status `installing`, helper ran with the exact expected arguments, history entry
   recorded, audit line logged, request file removed. No real package was installed.
-* **Not yet tested:** upgrading real packages, and a real root install (`useradd`, `StateDirectory` ownership, `ProtectHome`)
+* `make test-apply` upgrades a real `.deb` through the real daemon and helper in a throwaway Docker container
+  (see `docs/apply-design.md`), including refusing forged requests.
+* **Not yet tested:** the path unit driving a real upgrade, a reboot, and a real root install (`useradd`, `StateDirectory` ownership, `ProtectHome`)
   on a clean machine. Try it in a VM or container before relying on it.
 
 ## Why no .deb/.rpm yet

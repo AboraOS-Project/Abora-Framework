@@ -31,6 +31,17 @@ jobs:
           cargo build --release --locked -p aborad -p abora -p abora-apply
           scripts/check-installer.sh
 
+  apply:
+    name: apply updates (real apt in Docker)
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Upgrade a real .deb through aborad and abora-apply
+        run: scripts/test-apply-docker.sh
+
   iso:
     name: live ISO boots
     needs: check

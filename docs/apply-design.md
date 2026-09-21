@@ -77,5 +77,11 @@ Key rules:
 
 * Unit tests for request validation and the policy re-check (pure, no root).
 * The helper's command building is tested against a fake runner, like `HostPackageProvider`.
-* An end-to-end run in a disposable VM or container with a throwaway package, never on a
-  developer machine's own system.
+* **`make test-apply`** (`scripts/test-apply-docker.sh`, also run in CI): the real `aborad` and
+  `abora-apply` against **real apt** in a throwaway `ubuntu:24.04` container. It builds a real `.deb` in
+  two versions, and checks that a request upgrades exactly that package, keeps the administrator's
+  edited config file (no prompt), leaves `dpkg --audit` clean, records the history and the audit
+  line, and that a forged request outside the window, or with a hostile package name, is refused by
+  the helper itself. Never run on a developer machine's own packages.
+* Not covered: the systemd path unit driving a real upgrade (the unit and its trigger were tested
+  separately), reboots, and a full VM install with `useradd` and `StateDirectory` ownership.
