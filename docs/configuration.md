@@ -54,15 +54,16 @@ Loading always parses *and* validates. Invalid config is rejected loudly:
 | Key             | Type            | Default  | Meaning                        |
 |-----------------|-----------------|----------|--------------------------------|
 | `channel`       | string / table  | `stable` | `stable`, `beta`, `nightly`, or `{ custom = "name" }` |
-| `automatic`     | bool            | `true`   | Install available updates automatically (inside windows) |
+| `automatic`     | bool            | `false`  | Apply available updates by itself, inside a maintenance window. **Off by default**: nothing installs unless you turn this on (or ask with `abora updates apply`) |
 | `check_interval`| string          | `6h`     | Poll interval: `<n>s`, `<n>m`, `<n>h`, or `<n>d` |
 | `reboot_policy` | string          | `ask`    | Reboot outside a window: `ask`, `always`, `never` |
 | `apply_result_file` | absolute path | `/var/lib/abora-apply/result.json` | Where `abora-apply` writes the outcome of an apply; read by both it and `aborad` |
 | `state_file`    | absolute path   | `/var/lib/abora/updates.json` | Update history and state; read at startup (restart to change). If it cannot be opened the daemon logs a warning and keeps state in memory only |
 
-`check_interval` drives the scheduler (checks are read-only). `automatic`, `[maintenance]` and
-`reboot_policy` decide what the policy *would* permit, which `GET /api/v1/updates` reports; installing and
-rebooting themselves are not implemented yet. See [docs/update.md](update.md#the-scheduler).
+`check_interval` drives the scheduler (checks are read-only). `automatic = true` lets the scheduler request an
+apply by itself, but only inside a `[maintenance]` window (no window means never), at most once per
+`check_interval`; a manual `abora updates apply` needs a window but not `automatic`. `reboot_policy` decides
+whether the helper may reboot afterwards. See [docs/update.md](update.md#the-scheduler).
 
 ### `[maintenance]` — scheduled windows
 

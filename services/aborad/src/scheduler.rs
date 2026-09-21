@@ -12,7 +12,9 @@
 use std::time::{Duration, Instant};
 
 use abora_api::ScheduleInfo;
-use abora_config::schedule::{check_interval, check_is_due, local_time, permissions, Permissions};
+use abora_config::schedule::{
+    check_interval, check_is_due, local_time, permissions, should_auto_apply, Permissions,
+};
 use abora_log::{info, warn};
 
 use crate::state::SharedState;
@@ -25,6 +27,7 @@ pub async fn run(state: SharedState) {
     let mut last_attempt: Option<Instant> = None;
     let mut last_ok = true;
     let mut previous: Option<Permissions> = None;
+    let mut last_auto_attempt: Option<Instant> = None;
 
     loop {
         // Copy what is needed out of the config so no lock is held across an await.
@@ -104,6 +107,37 @@ pub async fn run(state: SharedState) {
                     last_ok = false;
                     warn!(state.logger, "update check task failed: {e}");
                 }
+            }
+        }
+
+        // Opt-in automatic apply: `[updates] automatic = true`, inside a maintenance window. The request
+        // goes through exactly the same checks and the same root helper as a manual one.
+        let (has_available, pending) = state.updates.apply_inputs();
+        if should_auto_apply(
+            &perms,
+            has_available,
+            pending,
+            last_auto_attempt.map(|t| t.elapsed()),
+            interval,
+        ) {
+            last_auto_attempt = Some(Instant::now());
+            let worker = state.clone();
+            let cfg = config_snapshot.clone();
+            let outcome = tokio::task::spawn_blocking(move || {
+                worker
+                    .updates
+                    .request_apply(&cfg, "automatic (scheduler)", false)
+            })
+            .await;
+            match outcome {
+                Ok(Ok(r)) => info!(
+                    state.logger,
+                    "audit: automatic apply requested for {} package(s) (request {})",
+                    r.packages.len(),
+                    r.id.as_deref().unwrap_or("-")
+                ),
+                Ok(Err(e)) => warn!(state.logger, "audit: automatic apply not requested: {e:?}"),
+                Err(e) => warn!(state.logger, "automatic apply task failed: {e}"),
             }
         }
 

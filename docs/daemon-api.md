@@ -176,7 +176,7 @@ the result. See [docs/update.md](update.md).
   (`error` carries a `message`, for example when `apt-get` is missing).
 * `schedule` is what the update policy permits at the moment it was last evaluated (about every 30 s; omitted
   until the first evaluation). `apply_permitted` says a requested apply would be accepted now; `installs_permitted`
-  is about *automatic* installs, which are not implemented, so nothing acts on it. See
+  says the scheduler may apply by itself now (`[updates] automatic` on, inside a window). See
   [docs/update.md](update.md#the-scheduler).
 * `reboot.required` reflects `/var/run/reboot-required`; `pending_since` and `reason` are set when known.
 * `available` is what the last check found (`size_bytes: 0` means unknown; the exact Debian

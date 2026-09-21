@@ -232,6 +232,17 @@ impl UpdatesState {
         }
     }
 
+    /// Whether the last check found anything, and whether an apply is already waiting for the helper.
+    /// Used by the scheduler's automatic apply.
+    pub fn apply_inputs(&self) -> (bool, bool) {
+        let has_available = !self
+            .available
+            .read()
+            .expect("updates lock poisoned")
+            .is_empty();
+        (has_available, self.apply_pending())
+    }
+
     /// Ask the root helper to apply the packages the last check listed (or, with `dry_run`, say what
     /// would happen). The policy is checked here for a clear early answer; the helper checks it
     /// again itself and is the one that decides.

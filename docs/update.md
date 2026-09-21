@@ -102,12 +102,19 @@ implementable now while guaranteeing no accidental updates.
    Checks are read-only and are **not** limited to maintenance windows.
 2. **Evaluates the policy** (`abora_config::schedule`, pure and unit tested) for the server's
    local time and publishes it as `schedule` in `GET /api/v1/updates`. Changes are logged.
+3. **Applies automatically, only if you opted in** (`[updates] automatic = true`, default `false`):
+   right after a check, if updates are available, the window is open, nothing is already pending
+   and the last automatic attempt was at least one `check_interval` ago, it makes the same request
+   `abora updates apply` would (caller `automatic (scheduler)`, audit line logged) and the same root
+   helper does the work, re-checking everything itself. A failed apply is retried at most once per
+   interval, never in a tight loop.
 
 The policy:
 
 | Question | Answer |
 |----------|--------|
-| Installs permitted? | only if `[updates] automatic` **and** `[maintenance] enabled` **and** the local time is inside a window. No windows means never. |
+| Automatic apply permitted? | only if `[updates] automatic` (**off by default**) **and** `[maintenance] enabled` **and** the local time is inside a window. No windows means never. |
+| Requested apply permitted? | `[maintenance] enabled` and inside a window; `automatic` is not needed. |
 | Reboot permitted? | `reboot_policy = "always"`: yes. `"never"`: no. `"ask"` (default): only inside a window. |
 | Local time unknown? | nothing is permitted (except `always` for reboots, which does not use the clock). |
 
@@ -141,8 +148,8 @@ non-zero if the daemon refuses (nothing to apply, outside a maintenance window, 
 
 ## Not implemented (honestly)
 
-* **Automatic installs.** The scheduler only *reports* `installs_permitted`; nothing acts on it.
-  Applying is manual: `POST /api/v1/updates/apply` (see below).
+* Automatic apply is opt-in and deliberately simple: no per-package rules, no security-only mode, no
+  "only on the first Sunday" logic beyond the window.
 * Only the apt provider exists.
 
 ## Roadmap order
@@ -151,4 +158,4 @@ non-zero if the daemon refuses (nothing to apply, outside a maintenance window, 
 2. Provider: read-only `check`/`status`/`history` for apt. **Done.**
 3. Scheduler: poll + policy evaluation in `aborad`. **Done.**
 4. API: `GET /api/v1/updates`. **Done.**
-5. Apply: root helper + `POST /api/v1/updates/apply`, reboot behind `RebootPolicy`. **Done (manual).** Automatic apply is next.
+5. Apply: root helper + `POST /api/v1/updates/apply`, reboot behind `RebootPolicy`, opt-in automatic apply. **Done.**

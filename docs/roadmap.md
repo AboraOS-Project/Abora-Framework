@@ -19,9 +19,10 @@ sysinfo, API skeleton, read-only daemon, CLI, docs).
 
 - [x] Persistent update state + history store (`abora_update::UpdateStore`, used by `aborad` via `[updates] state_file`).
 - [x] A real `UpdateProvider` implementation: `HostPackageProvider` (apt, read-only check; `apply` still refused).
-- [x] Poll scheduler (`scheduler.rs` + `abora_config::schedule`): checks every `check_interval`; reports what `[maintenance]` windows, `automatic` and `reboot_policy` permit. Nothing is installed yet.
+- [x] Poll scheduler (`scheduler.rs` + `abora_config::schedule`): checks every `check_interval`; reports what `[maintenance]` windows, `automatic` and `reboot_policy` permit.
 - [x] `GET /api/v1/updates` (status / available / reboot / history) replacing the `501`; checks run at startup and every `check_interval`.
-- [x] **Applying updates**, manual first: root helper `abora-apply`, token-only `POST /api/v1/updates/apply` (with `dry_run`), reboot only when policy allows. Verified against real apt in a throwaway Docker container (`make test-apply`, also in CI); not yet in a full VM with systemd driving it. Automatic apply is not implemented. See [apply-design.md](apply-design.md).
+- [x] **Applying updates**, manual first: root helper `abora-apply`, token-only `POST /api/v1/updates/apply` (with `dry_run`), reboot only when policy allows. Verified against real apt in a throwaway Docker container (`make test-apply`, also in CI); not yet in a full VM with systemd driving it. See [apply-design.md](apply-design.md).
+- [x] Automatic apply, **opt-in** (`[updates] automatic = true`, off by default; inside a window, at most once per `check_interval`). Verified on real apt in Docker, both off and on. The default of `automatic` changed from `true` to `false` so that nothing installs unattended on an existing config.
 
 ## Milestone 3 — platform consumers
 

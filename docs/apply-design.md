@@ -61,7 +61,8 @@ Key rules:
 ## What it does not do (on purpose)
 
 * No downgrade, no `dist-upgrade`, no package removal, no new repositories.
-* No automatic apply when the window opens until the manual path has run cleanly for a while.
+* Automatic apply is **opt-in** (`[updates] automatic = true`, default off), was added after the manual path had been
+  tested against real apt, and uses exactly the same request, helper and checks as a manual apply.
   Automatic apply is a later, separate switch.
 * No non-apt providers yet.
 

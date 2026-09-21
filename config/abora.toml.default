@@ -25,8 +25,9 @@
 [updates]
 # Update channel: "stable", "beta", "nightly", or { custom = "name" }.
 channel = "stable"
-# Install available updates automatically (inside maintenance windows).
-automatic = true
+# Apply available updates by itself, inside maintenance windows (needs [maintenance] windows).
+# OFF by default: nothing is installed unless you turn this on or ask for it (abora updates apply).
+automatic = false
 # How often to poll for updates: <n>s|m|h|d, e.g. "30m", "6h", "1d".
 check_interval = "6h"
 # Reboot outside a maintenance window: "ask", "always", "never".

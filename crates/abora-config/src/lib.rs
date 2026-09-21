@@ -311,7 +311,7 @@ impl Default for UpdatesConfig {
     fn default() -> Self {
         Self {
             channel: Channel::default(),
-            automatic: true,
+            automatic: false,
             check_interval: "6h".to_owned(),
             reboot_policy: RebootPolicy::default(),
             state_file: PathBuf::from("/var/lib/abora/updates.json"),
@@ -578,7 +578,10 @@ enabled = true
         assert_eq!(cfg.remote.listen_addr, "127.0.0.1:7360");
         assert!(!cfg.remote.enabled);
         assert!(cfg.security.require_authentication);
-        assert!(cfg.updates.automatic);
+        assert!(
+            !cfg.updates.automatic,
+            "nothing may install unattended unless the operator turns it on"
+        );
         assert_eq!(cfg.updates.channel, Channel::Stable);
         assert_eq!(cfg.api.base_path, "/api/v1");
     }
@@ -587,7 +590,7 @@ enabled = true
     fn partial_config_overlays_defaults() {
         let cfg = Config::from_str("[updates]\nchannel = \"nightly\"\n").unwrap();
         assert_eq!(cfg.updates.channel, Channel::Nightly);
-        assert!(cfg.updates.automatic); // not overridden -> default
+        assert!(!cfg.updates.automatic); // not overridden -> default
         assert_eq!(cfg.system.hostname, None);
     }
 

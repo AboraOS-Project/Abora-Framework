@@ -115,6 +115,25 @@ pub fn check_interval(config: &Config) -> Duration {
     )
 }
 
+/// Whether the scheduler should ask for an automatic apply now.
+///
+/// Only when policy permits automatic installs (`[updates] automatic` and inside a window), there
+/// is something to apply, no apply is already pending, and the last automatic attempt was at least
+/// one `interval` ago (or there was none). The interval keeps a failing apply from being retried
+/// every 30 seconds.
+pub fn should_auto_apply(
+    perms: &Permissions,
+    has_available: bool,
+    apply_pending: bool,
+    since_last_attempt: Option<Duration>,
+    interval: Duration,
+) -> bool {
+    perms.installs_permitted
+        && has_available
+        && !apply_pending
+        && since_last_attempt.is_none_or(|t| t >= interval)
+}
+
 /// How soon to try again after a failed check, at most.
 pub const RETRY_AFTER_FAILURE: Duration = Duration::from_secs(15 * 60);
 
@@ -349,5 +368,51 @@ mod tests {
         ] {
             assert_eq!(parse_date_output(bad), None, "{bad:?}");
         }
+    }
+
+    #[test]
+    fn auto_apply_needs_every_condition() {
+        let hour = Duration::from_secs(3600);
+        let ok = Permissions {
+            in_maintenance_window: Some(true),
+            apply_permitted: true,
+            installs_permitted: true,
+            reboot_permitted: false,
+        };
+        assert!(should_auto_apply(&ok, true, false, None, hour));
+        assert!(
+            should_auto_apply(&ok, true, false, Some(hour), hour),
+            "exactly one interval later"
+        );
+
+        assert!(
+            !should_auto_apply(&ok, false, false, None, hour),
+            "nothing to apply"
+        );
+        assert!(
+            !should_auto_apply(&ok, true, true, None, hour),
+            "one is already pending"
+        );
+        assert!(
+            !should_auto_apply(&ok, true, false, Some(Duration::from_secs(60)), hour),
+            "tried a minute ago: no retry storm"
+        );
+        let off = Permissions {
+            installs_permitted: false,
+            ..ok
+        };
+        assert!(
+            !should_auto_apply(&off, true, false, None, hour),
+            "automatic is off or outside the window"
+        );
+        let manual_only = Permissions {
+            apply_permitted: true,
+            installs_permitted: false,
+            ..ok
+        };
+        assert!(
+            !should_auto_apply(&manual_only, true, false, None, hour),
+            "a manual-apply window is not enough"
+        );
     }
 }

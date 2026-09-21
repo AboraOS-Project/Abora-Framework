@@ -55,6 +55,7 @@ $B/abora config check /etc/abora/abora.toml | tail -1 >/dev/null && echo "config
 
 step "start aborad (real apt-get for the check) and ask it to apply"
 $B/aborad --config /etc/abora/abora.toml > /tmp/aborad.log 2>&1 &
+ABORAD_PID=$!
 sleep 3
 API=http://127.0.0.1:7396/api/v1; H="Authorization: Bearer $SECRET"
 curl -s -H "$H" $API/updates | python3 -c "import sys,json; d=json.load(sys.stdin); print('found:', [u['component'] for u in d['available']], '| status:', d['status']['state'])"
@@ -119,5 +120,42 @@ $B/abora-apply --config /etc/abora/abora.toml
 grep -q '"succeeded": false' /var/lib/abora-apply/result.json || fail "the helper accepted a hostile package name"
 [ "$(dpkg-query -W -f='${Version}' abora-testpkg)" = 2.0 ] || fail "the package changed despite the refusal"
 echo "ok: hostile package name refused"
+
+step "automatic apply is OFF by default: an open window alone must not install anything"
+kill "$ABORAD_PID"; sleep 1
+mkpkg 4.0 "packaged=4.0"; reindex; apt-get update -qq >/dev/null
+python3 - "${NAMES[$DAY]}" <<'PY'
+import sys,re
+p='/etc/abora/abora.toml'; s=open(p).read()
+s=re.sub(r'(?m)^days = \[".*"\]$','days = ["%s"]'%sys.argv[1],s)   # window is open now again
+open(p,'w').write(s)
+PY
+grep -q '^automatic = false' /etc/abora/abora.toml || fail "the default config should have automatic = false"
+$B/aborad --config /etc/abora/abora.toml > /tmp/aborad2.log 2>&1 &
+ABORAD_PID=$!
+sleep 36   # more than one scheduler tick (30s) with the window open and 4.0 available
+[ ! -e /var/lib/abora/apply-request.json ] || fail "an update was requested although automatic = false"
+[ "$(dpkg-query -W -f='${Version}' abora-testpkg)" = 2.0 ] || fail "the package changed although automatic = false"
+echo "ok: window open + update available + automatic = false: nothing requested, nothing installed"
+
+step "automatic = true: the scheduler asks by itself, and the helper applies it"
+kill "$ABORAD_PID"; sleep 1
+sed -i 's/^automatic = false/automatic = true/' /etc/abora/abora.toml
+$B/aborad --config /etc/abora/abora.toml > /tmp/aborad3.log 2>&1 &
+ABORAD_PID=$!
+for i in $(seq 1 40); do [ -e /var/lib/abora/apply-request.json ] && break; sleep 1; done
+[ -e /var/lib/abora/apply-request.json ] || fail "the scheduler never requested the update"
+python3 - <<'PY'
+import json
+r=json.load(open('/var/lib/abora/apply-request.json'))
+assert r['requested_by']=='automatic (scheduler)', r
+assert r['packages']==['abora-testpkg'], r
+print('ok: request made by', r['requested_by'], 'for', r['packages'])
+PY
+$B/abora-apply --config /etc/abora/abora.toml
+[ "$(dpkg-query -W -f='${Version}' abora-testpkg)" = 4.0 ] || fail "the automatic apply did not upgrade to 4.0"
+grep -q '"message":"audit: automatic apply requested' /tmp/aborad3.log || fail "no audit line for the automatic apply"
+echo "ok: upgraded to 4.0 automatically, audit line logged"
+kill "$ABORAD_PID" 2>/dev/null || true
 
 echo; echo "ALL GOOD"
