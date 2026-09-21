@@ -6,7 +6,7 @@
 //! * Read-only API (`health`, `version`, `system`, `services`) with a
 //!   per-operation permission model.
 //! * No arbitrary remote shell/command execution endpoint, ever.
-//! * Structured logs to stderr (captured by systemd/journald).
+//! * Structured logs to stderr (captured by systemd/journald), including panics.
 //!
 //! Run `aborad --help` for usage.
 
@@ -201,6 +201,8 @@ fn run(config_path: Option<PathBuf>) -> Result<(), String> {
     // Bootstrap a minimal logger for the config-resolution phase; the real
     // logger is configured below from the loaded config.
     let bootstrap_logger = Logger::builder().build();
+    // Panics become structured log records from the very start (see abora_log::install_panic_hook).
+    abora_log::install_panic_hook(bootstrap_logger.clone());
 
     let loaded = resolve_config(config_path, &bootstrap_logger)?;
     let config = loaded.config;
@@ -216,6 +218,8 @@ fn run(config_path: Option<PathBuf>) -> Result<(), String> {
         .level(config.logging.level)
         .format(config.logging.format)
         .build();
+    // Switch panic records to the configured level/format.
+    abora_log::install_panic_hook(logger.clone());
     if let Err(first) = abora_log::set_global(logger.clone()) {
         // Only one logger can be global per process; not fatal for the daemon.
         let _ = first;

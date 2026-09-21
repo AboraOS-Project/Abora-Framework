@@ -11,7 +11,7 @@ sysinfo, API skeleton, read-only daemon, CLI, docs).
 - [x] Filters/pagination for the service registry and per-service detail (`systemctl show`).
 - [x] Request IDs (`request_id` in error envelope + `X-Request-ID` correlation).
 - [x] Config reload (SIGHUP) and config file watching.
-- [ ] Structured panic/log-of-record wiring (already partially in place).
+- [x] Structured panic logging: `abora_log::install_panic_hook`, wired into `aborad` (panics are JSON error records with thread, location and, with `RUST_BACKTRACE`, a backtrace).
 - [x] Live ISO (`make iso` / `make run`): Limine + Linux + `aborad`, with the Abora logo and boot logs on screen.
 - [x] CI pipeline (`.github/workflows/ci.yml`): fmt + clippy + test, live-ISO boot test; `ABORA_BUILD_COMMIT` stamped builds. Not yet run on GitHub.
 

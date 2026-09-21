@@ -363,6 +363,40 @@ impl LoggerBuilder {
     }
 }
 
+/// Send panics through `logger` as structured error records instead of the
+/// default unstructured text on stderr.
+///
+/// The record has component `panic`, the panic message, and the fields
+/// `thread` and `location` (`file:line:col`). When `RUST_BACKTRACE` is set a
+/// `backtrace` field is included. Call it again with a different logger to
+/// replace the previous one (for example once the configured logger exists);
+/// the earlier hook is not chained, so nothing is printed twice.
+pub fn install_panic_hook(logger: Logger) {
+    std::panic::set_hook(Box::new(move |info| {
+        let payload = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|s| (*s).to_owned())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "non-string panic payload".to_owned());
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()));
+        let thread = std::thread::current().name().unwrap_or("<unnamed>").to_owned();
+
+        let mut record = logger
+            .record(Level::Error)
+            .component("panic")
+            .field("thread", thread)
+            .field("location", location);
+        let backtrace = std::backtrace::Backtrace::capture();
+        if backtrace.status() == std::backtrace::BacktraceStatus::Captured {
+            record = record.field("backtrace", backtrace.to_string());
+        }
+        record.emit_string(format!("panic: {payload}"));
+    }));
+}
+
 static GLOBAL: OnceLock<Logger> = OnceLock::new();
 
 /// Install a global default logger for the current process.

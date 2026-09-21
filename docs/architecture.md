@@ -113,6 +113,10 @@ captures into journald. JSON is the default format. Sensitive values are
 wrapped in `Redacted<T>`, which always serializes as `<redacted>`. See
 [docs/configuration.md](configuration.md#logging).
 
+Panics are logged the same way: `aborad` installs `abora_log::install_panic_hook`, so a
+panic is one JSON error record (`component: "panic"`, with `thread`, `location` and, when
+`RUST_BACKTRACE` is set, `backtrace`) rather than free text that a log parser would miss.
+
 ## Security
 
 Threat model and guarantees are in [docs/security.md](security.md) and the
