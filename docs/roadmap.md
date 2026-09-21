@@ -21,6 +21,7 @@ sysinfo, API skeleton, read-only daemon, CLI, docs).
 - [x] A real `UpdateProvider` implementation: `HostPackageProvider` (apt, read-only check; `apply` still refused).
 - [x] Poll scheduler (`scheduler.rs` + `abora_config::schedule`): checks every `check_interval`; reports what `[maintenance]` windows, `automatic` and `reboot_policy` permit. Nothing is installed yet.
 - [x] `GET /api/v1/updates` (status / available / reboot / history) replacing the `501`; checks run at startup and every `check_interval`.
+- [ ] **Applying updates** (root helper, `POST /api/v1/updates/apply`, reboot orchestration). Design proposal awaiting review: [apply-design.md](apply-design.md).
 
 ## Milestone 3 — platform consumers
 
