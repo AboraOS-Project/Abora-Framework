@@ -98,6 +98,8 @@ esac
 VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' "$ROOT/Cargo.toml" | head -1)"
 COMMIT="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 echo "v$VERSION ($COMMIT)" > "$ROOTFS/etc/abora-version"
+# System files a fork has not customized yet (see docs/forking.md). The boot screen warns about them.
+"$ROOT/scripts/fork-check.sh" --plain > "$ROOTFS/etc/abora-fork-todo"
 ( cd "$ROOTFS" && find . | sort | cpio -o -H newc --owner=0:0 --quiet | gzip -9 ) > "$BUILD/initramfs.cpio.gz"
 
 # --- ISO ---------------------------------------------------------------------

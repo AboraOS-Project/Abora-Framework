@@ -8,7 +8,9 @@
 # The number is the order to edit them in. When you have edited the file for
 # your fork, delete that line; it then drops off this list.
 #
-# Usage: scripts/fork-check.sh [--strict]   (--strict exits 1 while any remain, for CI)
+# Usage: scripts/fork-check.sh [--strict|--plain]
+#   --strict  exit 1 while any remain (for CI)
+#   --plain   one line per remaining file, nothing else (used by make-iso.sh for the boot screen)
 
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -23,6 +25,11 @@ PATTERN='^[[:space:]]*(#|//)[[:space:]]*ABORA-SYSTEM-FILE[[:space:]]+[0-9]+:'
 LIST="$(printf '%s\n' "$FILES" | grep -v '\.md$' | xargs -d '\n' grep -InE "$PATTERN" 2>/dev/null \
     | sed -E 's/^([^:]+):([0-9]+):[[:space:]]*(#|\/\/)[[:space:]]*ABORA-SYSTEM-FILE[[:space:]]+([0-9]+):[[:space:]]*(.*)$/\4\t\1:\2\t\5/' \
     | sort -n || true)"
+
+if [ "${1:-}" = "--plain" ]; then
+    [ -n "$LIST" ] && printf '%s\n' "$LIST" | awk -F'\t' '{ printf "%s. %s - %s\n", $1, $2, $3 }'
+    exit 0
+fi
 
 if [ -z "$LIST" ]; then
     echo "fork-check: no system files left to customize."

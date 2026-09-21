@@ -84,6 +84,12 @@ else
     while read -r l; do say "       $l"; done < /run/status.out
 fi
 
+# A fork is expected to customize its system files first (make fork-check). Say so on screen.
+if [ -s /etc/abora-fork-todo ]; then
+    warn "fork: system files not customized yet (run 'make fork-check', edit them in order):"
+    while read -r l; do say "       $l"; done < /etc/abora-fork-todo
+fi
+
 say "Boot finished. Serial console: type 'abora status', 'poweroff' or 'reboot'."
 
 # Interactive shell on the serial console. If there is no console input (for
