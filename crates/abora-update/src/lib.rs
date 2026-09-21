@@ -37,18 +37,14 @@ pub use store::{Opened, StoreError, UpdateStore};
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum Channel {
+    #[default]
     Stable,
     Beta,
     Nightly,
     #[serde(rename = "custom")]
     Custom(String),
-}
-
-impl Default for Channel {
-    fn default() -> Self {
-        Channel::Stable
-    }
 }
 
 impl fmt::Display for Channel {
@@ -65,19 +61,15 @@ impl fmt::Display for Channel {
 /// What to do when an update requires a reboot outside a maintenance window.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum RebootPolicy {
     /// Ask (default): never reboot outside a maintenance window.
+    #[default]
     Ask,
     /// Reboot immediately after a successful update.
     Always,
     /// Never reboot automatically; wait for an operator.
     Never,
-}
-
-impl Default for RebootPolicy {
-    fn default() -> Self {
-        RebootPolicy::Ask
-    }
 }
 
 /// Day of week used for maintenance windows.
@@ -137,33 +129,27 @@ pub struct AvailableUpdates {
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum UpdateStatus {
     UpToDate,
-    UpdateAvailable { versions: Vec<String> },
+    UpdateAvailable {
+        versions: Vec<String>,
+    },
     Installing {
         component: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         progress_percent: Option<u8>,
     },
-    Error { message: String },
+    Error {
+        message: String,
+    },
 }
 
 /// Whether a reboot is required to finish applying updates.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 pub struct RebootStatus {
     pub required: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_since: Option<String>,
-}
-
-impl Default for RebootStatus {
-    fn default() -> Self {
-        Self {
-            required: false,
-            reason: None,
-            pending_since: None,
-        }
-    }
 }
 
 /// A single entry from the update history log.
@@ -244,7 +230,10 @@ mod tests {
             ("stable", Channel::Stable),
             ("beta", Channel::Beta),
             ("nightly", Channel::Nightly),
-            ("channel = { custom = 'edge' }", Channel::Custom("edge".into())),
+            (
+                "channel = { custom = 'edge' }",
+                Channel::Custom("edge".into()),
+            ),
         ] {
             let text = if raw.starts_with("channel") {
                 raw.to_owned()
@@ -305,6 +294,9 @@ mod tests {
             released_at: None,
             checksums: None,
         };
-        assert!(matches!(n.apply(&update), Err(UpdateError::NotImplemented(_))));
+        assert!(matches!(
+            n.apply(&update),
+            Err(UpdateError::NotImplemented(_))
+        ));
     }
 }

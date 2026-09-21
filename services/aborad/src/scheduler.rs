@@ -25,7 +25,11 @@ const TICK: Duration = Duration::from_secs(30);
 /// The server's local time, from `date` (which honours `TZ` and `/etc/localtime`, and the
 /// standard library has no way to ask). `None` if it cannot be determined.
 pub fn local_time() -> Option<LocalTime> {
-    let out = Command::new("date").arg("+%u %H:%M").env("LC_ALL", "C").output().ok()?;
+    let out = Command::new("date")
+        .arg("+%u %H:%M")
+        .env("LC_ALL", "C")
+        .output()
+        .ok()?;
     if !out.status.success() {
         return None;
     }
@@ -47,7 +51,10 @@ fn parse_date_output(text: &str) -> Option<LocalTime> {
         _ => return None,
     };
     let (hour, minute): (u32, u32) = (hour.parse().ok()?, minute.parse().ok()?);
-    (hour < 24 && minute < 60).then_some(LocalTime { weekday, minutes: hour * 60 + minute })
+    (hour < 24 && minute < 60).then_some(LocalTime {
+        weekday,
+        minutes: hour * 60 + minute,
+    })
 }
 
 /// Runs for the life of the daemon. The first pass checks for updates immediately.
@@ -60,12 +67,19 @@ pub async fn run(state: SharedState) {
         // Copy what is needed out of the config so no lock is held across an await.
         let (interval, channel, config_snapshot) = {
             let config = state.config.read().expect("config lock poisoned");
-            (check_interval(&config), config.updates.channel.clone(), config.clone())
+            (
+                check_interval(&config),
+                config.updates.channel.clone(),
+                config.clone(),
+            )
         };
 
         let now = tokio::task::spawn_blocking(local_time).await.ok().flatten();
         if now.is_none() {
-            warn!(state.logger, "could not read the local time; maintenance windows are treated as closed");
+            warn!(
+                state.logger,
+                "could not read the local time; maintenance windows are treated as closed"
+            );
         }
         let perms = permissions(&config_snapshot, now);
         state.updates.set_schedule(ScheduleInfo {
@@ -92,11 +106,15 @@ pub async fn run(state: SharedState) {
         if due {
             last_attempt = Some(Instant::now());
             let worker = state.clone();
-            let result = tokio::task::spawn_blocking(move || worker.updates.refresh(&channel)).await;
+            let result =
+                tokio::task::spawn_blocking(move || worker.updates.refresh(&channel)).await;
             match result {
                 Ok(Ok(n)) => {
                     last_ok = true;
-                    info!(state.logger, "update check finished: {n} update(s) available");
+                    info!(
+                        state.logger,
+                        "update check finished: {n} update(s) available"
+                    );
                 }
                 Ok(Err(e)) => {
                     last_ok = false;
@@ -119,14 +137,41 @@ mod tests {
 
     #[test]
     fn date_output_is_parsed() {
-        assert_eq!(parse_date_output("7 03:15\n"), Some(LocalTime { weekday: Weekday::Sunday, minutes: 3 * 60 + 15 }));
-        assert_eq!(parse_date_output("1 00:00"), Some(LocalTime { weekday: Weekday::Monday, minutes: 0 }));
-        assert_eq!(parse_date_output("5 23:59"), Some(LocalTime { weekday: Weekday::Friday, minutes: 23 * 60 + 59 }));
+        assert_eq!(
+            parse_date_output("7 03:15\n"),
+            Some(LocalTime {
+                weekday: Weekday::Sunday,
+                minutes: 3 * 60 + 15
+            })
+        );
+        assert_eq!(
+            parse_date_output("1 00:00"),
+            Some(LocalTime {
+                weekday: Weekday::Monday,
+                minutes: 0
+            })
+        );
+        assert_eq!(
+            parse_date_output("5 23:59"),
+            Some(LocalTime {
+                weekday: Weekday::Friday,
+                minutes: 23 * 60 + 59
+            })
+        );
     }
 
     #[test]
     fn garbage_date_output_is_rejected() {
-        for bad in ["", "0 01:00", "8 01:00", "3 25:00", "3 12:60", "Tue 10:00", "3", "3 10-30"] {
+        for bad in [
+            "",
+            "0 01:00",
+            "8 01:00",
+            "3 25:00",
+            "3 12:60",
+            "Tue 10:00",
+            "3",
+            "3 10-30",
+        ] {
             assert_eq!(parse_date_output(bad), None, "{bad:?}");
         }
     }

@@ -56,7 +56,10 @@ fn panics_become_structured_error_records() {
     assert_eq!(recs[0]["component"], "panic");
     assert_eq!(recs[0]["message"], "panic: disk on fire");
     assert_eq!(recs[0]["thread"], "worker-7");
-    assert!(recs[0]["location"].as_str().unwrap().contains("panic_hook.rs:"));
+    assert!(recs[0]["location"]
+        .as_str()
+        .unwrap()
+        .contains("panic_hook.rs:"));
 
     assert_eq!(recs[1]["message"], "panic: bad value 42");
 }

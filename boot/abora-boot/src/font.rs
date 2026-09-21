@@ -24,7 +24,11 @@ impl Font {
         if height == 0 || data.len() < need {
             return Err("truncated PSF1 font".into());
         }
-        Ok(Self { height, glyphs: data[4..need].to_vec(), count })
+        Ok(Self {
+            height,
+            glyphs: data[4..need].to_vec(),
+            count,
+        })
     }
 
     pub fn width(&self) -> usize {

@@ -96,6 +96,9 @@ impl Config {
     }
 
     /// Parse and validate configuration from a TOML string.
+    // Kept as an inherent method: it is public API, and it returns `ConfigError` (validated), which is
+    // what callers want rather than `FromStr`'s plain error type.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(raw: &str) -> Result<Self, ConfigError> {
         let cfg: Self = toml::from_str(raw).map_err(ConfigError::Toml)?;
         cfg.validate()
@@ -147,14 +150,23 @@ impl Config {
     /// Human-readable summary (used by the CLI and logs). No secrets.
     pub fn summary(&self) -> Vec<String> {
         vec![
-            format!("hostname override: {}", self.system.hostname.as_deref().unwrap_or("-")),
+            format!(
+                "hostname override: {}",
+                self.system.hostname.as_deref().unwrap_or("-")
+            ),
             format!("update channel: {}", self.updates.channel),
             format!("automatic updates: {}", self.updates.automatic),
             format!("maintenance enabled: {}", self.maintenance.enabled),
             format!("remote management enabled: {}", self.remote.enabled),
             format!("auth required: {}", self.security.require_authentication),
-            format!("listen: {} (loopback-only for now)", self.remote.listen_addr),
-            format!("log level: {}, format: {}", self.logging.level, self.logging.format),
+            format!(
+                "listen: {} (loopback-only for now)",
+                self.remote.listen_addr
+            ),
+            format!(
+                "log level: {}, format: {}",
+                self.logging.level, self.logging.format
+            ),
             format!("api base path: {}", self.api.base_path),
         ]
     }
@@ -168,7 +180,9 @@ impl Config {
             if h.is_empty() {
                 errors.push("[system] hostname must not be empty".to_owned());
             } else if h.chars().any(|c| c.is_whitespace()) {
-                errors.push(format!("[system] hostname `{hostname}` must not contain whitespace"));
+                errors.push(format!(
+                    "[system] hostname `{hostname}` must not contain whitespace"
+                ));
             }
         }
 
@@ -263,20 +277,12 @@ fn validate_windows(windows: &[MaintenanceWindow], errors: &mut Vec<String>) {
 /// System identity.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
+#[derive(Default)]
 pub struct SystemConfig {
     /// Optional hostname override shown by the API. Empty = use OS hostname.
     pub hostname: Option<String>,
     /// Free-form description surfaced by `GET /api/v1/system`.
     pub description: Option<String>,
-}
-
-impl Default for SystemConfig {
-    fn default() -> Self {
-        Self {
-            hostname: None,
-            description: None,
-        }
-    }
 }
 
 /// Automatic update behaviour.
@@ -377,18 +383,10 @@ impl Default for SecurityConfig {
 /// Logging settings.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
+#[derive(Default)]
 pub struct LoggingConfig {
     pub level: Level,
     pub format: Format,
-}
-
-impl Default for LoggingConfig {
-    fn default() -> Self {
-        Self {
-            level: Level::default(),
-            format: Format::default(),
-        }
-    }
 }
 
 /// HTTP API runtime limits.
@@ -436,13 +434,14 @@ impl FeaturesConfig {
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     #[error("could not read configuration file `{path}`: {source}")]
-    Io { path: PathBuf, source: std::io::Error },
+    Io {
+        path: PathBuf,
+        source: std::io::Error,
+    },
     #[error("could not parse TOML: {_0}")]
     Toml(#[from] toml::de::Error),
     #[error("configuration is not UTF-8: {source}")]
-    NotUtf8 {
-        source: std::str::Utf8Error,
-    },
+    NotUtf8 { source: std::str::Utf8Error },
     #[error("configuration is invalid:\n{0}")]
     Invalid(String),
 }
@@ -533,7 +532,10 @@ enabled = true
         let mut cfg = Config::default();
         cfg.updates.state_file = PathBuf::from("updates.json");
         let errors = cfg.validate().unwrap_err();
-        assert!(errors.iter().any(|e| e.contains("state_file")), "got: {errors:?}");
+        assert!(
+            errors.iter().any(|e| e.contains("state_file")),
+            "got: {errors:?}"
+        );
     }
 
     #[test]
@@ -552,7 +554,9 @@ enabled = true
     #[test]
     fn preserves_unknown_top_level_sections() {
         let cfg = Config::from_str(VALID).unwrap();
-        let telemetry = cfg.typed_extension::<TelemetryExt>("cloud.telemetry").unwrap();
+        let telemetry = cfg
+            .typed_extension::<TelemetryExt>("cloud.telemetry")
+            .unwrap();
         assert_eq!(telemetry, Some(TelemetryExt { enabled: true }));
         assert!(cfg.extension("cloud.telemetry").is_some());
         assert_eq!(cfg.extensions().len(), 1);

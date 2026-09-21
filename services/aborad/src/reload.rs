@@ -126,7 +126,11 @@ fn apply_reload(state: &SharedState, fresh: Config) {
         logger,
         "config reload applied (log level {}{})",
         new_level,
-        if level_changed { " changed" } else { " unchanged" }
+        if level_changed {
+            " changed"
+        } else {
+            " unchanged"
+        }
     );
 }
 
@@ -150,7 +154,10 @@ fn refresh_tokens(state: &SharedState, _level_changed: bool) {
         if tokens.is_some() {
             drop(tokens);
             *state.tokens.write().expect("tokens lock poisoned") = None;
-            info!(state.logger, "config reload: token authentication disabled (no token_file)");
+            info!(
+                state.logger,
+                "config reload: token authentication disabled (no token_file)"
+            );
         }
         return;
     };
@@ -160,12 +167,14 @@ fn refresh_tokens(state: &SharedState, _level_changed: bool) {
             let size = store.len();
             *state.tokens.write().expect("tokens lock poisoned") = Some(store);
             let note = if size == 0 {
-                "token file contains no tokens; all requests will be rejected with 401"
-                    .to_owned()
+                "token file contains no tokens; all requests will be rejected with 401".to_owned()
             } else if previous_not_empty {
                 format!("{size} token(s) reloaded from {}", path.display())
             } else {
-                format!("token authentication enabled ({size} token(s) from {})", path.display())
+                format!(
+                    "token authentication enabled ({size} token(s) from {})",
+                    path.display()
+                )
             };
             info!(state.logger, "config reload: {note}");
         }
@@ -184,7 +193,10 @@ fn changed_settings(previous: &Config, fresh: &Config) -> Vec<String> {
     let mut changes = Vec::new();
 
     if previous.system.hostname != fresh.system.hostname {
-        changes.push(format!("[system] hostname = {}", fresh.system.hostname.as_deref().unwrap_or("-")));
+        changes.push(format!(
+            "[system] hostname = {}",
+            fresh.system.hostname.as_deref().unwrap_or("-")
+        ));
     }
     if previous.system.description != fresh.system.description {
         changes.push("system description changed".to_owned());
@@ -196,13 +208,22 @@ fn changed_settings(previous: &Config, fresh: &Config) -> Vec<String> {
         changes.push(format!("[updates] automatic = {}", fresh.updates.automatic));
     }
     if previous.updates.check_interval != fresh.updates.check_interval {
-        changes.push(format!("[updates] check_interval = {}", fresh.updates.check_interval));
+        changes.push(format!(
+            "[updates] check_interval = {}",
+            fresh.updates.check_interval
+        ));
     }
     if previous.updates.reboot_policy != fresh.updates.reboot_policy {
-        changes.push(format!("[updates] reboot_policy = {:?}", fresh.updates.reboot_policy));
+        changes.push(format!(
+            "[updates] reboot_policy = {:?}",
+            fresh.updates.reboot_policy
+        ));
     }
     if previous.maintenance.enabled != fresh.maintenance.enabled {
-        changes.push(format!("[maintenance] enabled = {}", fresh.maintenance.enabled));
+        changes.push(format!(
+            "[maintenance] enabled = {}",
+            fresh.maintenance.enabled
+        ));
     }
     if previous.maintenance.windows != fresh.maintenance.windows {
         changes.push(format!(
@@ -219,7 +240,12 @@ fn changed_settings(previous: &Config, fresh: &Config) -> Vec<String> {
     if previous.security.token_file != fresh.security.token_file {
         changes.push(format!(
             "[security] token_file = {}",
-            fresh.security.token_file.as_deref().map(|p| p.display().to_string()).unwrap_or_else(|| "unset".to_owned())
+            fresh
+                .security
+                .token_file
+                .as_deref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "unset".to_owned())
         ));
     }
     if previous.logging.level != fresh.logging.level {
@@ -270,12 +296,12 @@ mod tests {
 
         let changes = changed_settings(&previous, &fresh);
         assert!(changes.iter().any(|c| c.contains("hostname = node-7")));
-        assert!(
-            changes
-                .iter()
-                .any(|c| c.contains("require_authentication = false"))
-        );
-        assert!(changes.iter().any(|c| c.contains("log level") || c.contains("[logging] level = debug")));
+        assert!(changes
+            .iter()
+            .any(|c| c.contains("require_authentication = false")));
+        assert!(changes
+            .iter()
+            .any(|c| c.contains("log level") || c.contains("[logging] level = debug")));
         assert!(!changes.iter().any(|c| c.contains("listen_addr")));
     }
 
@@ -371,7 +397,10 @@ mod tests {
         refresh_tokens(&state, false);
         let _ = std::fs::remove_file(&bad);
         let tokens = state.tokens.read().unwrap();
-        assert!(tokens.as_ref().is_some(), "previous store must survive a bad file");
+        assert!(
+            tokens.as_ref().is_some(),
+            "previous store must survive a bad file"
+        );
     }
 
     fn tempfile_path(name: &str) -> PathBuf {

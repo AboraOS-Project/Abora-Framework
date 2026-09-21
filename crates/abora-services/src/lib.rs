@@ -113,7 +113,7 @@ pub struct ServiceQuery {
 
 impl ServiceQuery {
     /// How many units match the filters, ignoring pagination.
-    pub fn total_matching<'a>(&self, services: &'a [ServiceStatus]) -> usize {
+    pub fn total_matching(&self, services: &[ServiceStatus]) -> usize {
         services.iter().filter(|s| self.matches(s)).count()
     }
 

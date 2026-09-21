@@ -45,7 +45,12 @@ pub struct StoreData {
 
 impl Default for StoreData {
     fn default() -> Self {
-        Self { schema: SCHEMA_VERSION, last_check: None, reboot: RebootStatus::default(), history: Vec::new() }
+        Self {
+            schema: SCHEMA_VERSION,
+            last_check: None,
+            reboot: RebootStatus::default(),
+            history: Vec::new(),
+        }
     }
 }
 
@@ -66,11 +71,18 @@ pub enum StoreError {
     #[error("update store I/O error at {path}: {message}")]
     Io { path: String, message: String },
     #[error("update store {path} was written by a newer version (schema {found}, this build understands {supported}); refusing to overwrite it")]
-    NewerSchema { path: String, found: u32, supported: u32 },
+    NewerSchema {
+        path: String,
+        found: u32,
+        supported: u32,
+    },
 }
 
 fn io_err(path: &Path, e: std::io::Error) -> StoreError {
-    StoreError::Io { path: path.display().to_string(), message: e.to_string() }
+    StoreError::Io {
+        path: path.display().to_string(),
+        message: e.to_string(),
+    }
 }
 
 /// The persistent store. Cheap to share behind an `Arc`.
@@ -83,7 +95,10 @@ pub struct UpdateStore {
 impl UpdateStore {
     /// A store that never touches the disk.
     pub fn in_memory() -> Self {
-        Self { path: None, data: Mutex::new(StoreData::default()) }
+        Self {
+            path: None,
+            data: Mutex::new(StoreData::default()),
+        }
     }
 
     /// Open (or start) the store at `path`. See the module docs for how damage is handled.
@@ -107,12 +122,20 @@ impl UpdateStore {
                     (StoreData::default(), Opened::Recovered { backup })
                 }
             },
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (StoreData::default(), Opened::Fresh),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                (StoreData::default(), Opened::Fresh)
+            }
             Err(e) => return Err(io_err(&path, e)),
         };
         let mut data = data;
         trim(&mut data);
-        Ok((Self { path: Some(path), data: Mutex::new(data) }, opened))
+        Ok((
+            Self {
+                path: Some(path),
+                data: Mutex::new(data),
+            },
+            opened,
+        ))
     }
 
     fn lock(&self) -> MutexGuard<'_, StoreData> {
@@ -224,7 +247,8 @@ mod tests {
     struct Scratch(PathBuf);
     impl Scratch {
         fn new(name: &str) -> Self {
-            let dir = std::env::temp_dir().join(format!("abora-store-{name}-{}", std::process::id()));
+            let dir =
+                std::env::temp_dir().join(format!("abora-store-{name}-{}", std::process::id()));
             let _ = fs::remove_dir_all(&dir);
             fs::create_dir_all(&dir).unwrap();
             Self(dir)
@@ -242,8 +266,20 @@ mod tests {
     fn entry(n: u64, ok: bool) -> UpdateHistoryEntry {
         UpdateHistoryEntry {
             applied_at: format!("2026-09-21T00:00:{:02}Z", n % 60),
-            from_version: Version { major: 0, minor: 1, patch: n, prerelease: None, build: None },
-            to_version: Version { major: 0, minor: 1, patch: n + 1, prerelease: None, build: None },
+            from_version: Version {
+                major: 0,
+                minor: 1,
+                patch: n,
+                prerelease: None,
+                build: None,
+            },
+            to_version: Version {
+                major: 0,
+                minor: 1,
+                patch: n + 1,
+                prerelease: None,
+                build: None,
+            },
             channel: Channel::Stable,
             component: "framework".into(),
             succeeded: ok,
@@ -260,7 +296,11 @@ mod tests {
         store.record_update(entry(1, true)).unwrap();
         store.record_update(entry(2, false)).unwrap();
         store
-            .set_reboot(RebootStatus { required: true, reason: Some("kernel".into()), pending_since: Some("2026-09-21T01:05:00Z".into()) })
+            .set_reboot(RebootStatus {
+                required: true,
+                reason: Some("kernel".into()),
+                pending_since: Some("2026-09-21T01:05:00Z".into()),
+            })
             .unwrap();
 
         let (again, opened) = UpdateStore::open(dir.file()).unwrap();
@@ -281,8 +321,16 @@ mod tests {
         }
         let history = store.history();
         assert_eq!(history.len(), MAX_HISTORY);
-        assert_eq!(history[0].from_version.patch, MAX_HISTORY as u64 + 24, "newest kept");
-        assert_eq!(history.last().unwrap().from_version.patch, 25, "oldest 25 dropped");
+        assert_eq!(
+            history[0].from_version.patch,
+            MAX_HISTORY as u64 + 24,
+            "newest kept"
+        );
+        assert_eq!(
+            history.last().unwrap().from_version.patch,
+            25,
+            "oldest 25 dropped"
+        );
     }
 
     #[test]
@@ -290,11 +338,16 @@ mod tests {
         let dir = Scratch::new("corrupt");
         fs::write(dir.file(), b"{ this is not json").unwrap();
         let (store, opened) = UpdateStore::open(dir.file()).unwrap();
-        let Opened::Recovered { backup } = opened else { panic!("expected Recovered, got {opened:?}") };
+        let Opened::Recovered { backup } = opened else {
+            panic!("expected Recovered, got {opened:?}")
+        };
         assert_eq!(fs::read(&backup).unwrap(), b"{ this is not json");
         assert!(store.history().is_empty());
         store.record_check("2026-09-21T02:00:00Z").unwrap();
-        assert!(matches!(UpdateStore::open(dir.file()).unwrap().1, Opened::Loaded));
+        assert!(matches!(
+            UpdateStore::open(dir.file()).unwrap().1,
+            Opened::Loaded
+        ));
     }
 
     #[test]
@@ -330,7 +383,10 @@ mod tests {
         store.record_check("2026-09-21T03:00:00Z").unwrap();
         let mode = fs::metadata(dir.file()).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
-        let names: Vec<_> = fs::read_dir(&dir.0).unwrap().map(|e| e.unwrap().file_name()).collect();
+        let names: Vec<_> = fs::read_dir(&dir.0)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
         assert_eq!(names.len(), 1, "only updates.json remains: {names:?}");
     }
 

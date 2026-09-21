@@ -134,7 +134,10 @@ impl SystemdServiceManager {
             .and_then(|s| file_state_enabled(s));
 
         let optional = |key: &str| -> Option<String> {
-            props.get(key).filter(|v| !v.is_empty() && v.as_str() != "[not set]").cloned()
+            props
+                .get(key)
+                .filter(|v| !v.is_empty() && v.as_str() != "[not set]")
+                .cloned()
         };
 
         Ok(ServiceDetail {
@@ -162,9 +165,16 @@ impl SystemdServiceManager {
 fn extract_argv(value: &str) -> Option<String> {
     let start = value.find("argv[]=")? + "argv[]=".len();
     let rest = &value[start..];
-    let end = rest.find(" ;").or_else(|| rest.find('}')).unwrap_or(rest.len());
+    let end = rest
+        .find(" ;")
+        .or_else(|| rest.find('}'))
+        .unwrap_or(rest.len());
     let raw = rest[..end].trim();
-    if raw.is_empty() { None } else { Some(raw.to_owned()) }
+    if raw.is_empty() {
+        None
+    } else {
+        Some(raw.to_owned())
+    }
 }
 
 /// Parse `systemctl show unit` output: `KEY=value` lines, blank-separated
@@ -175,7 +185,9 @@ fn parse_show(text: &str) -> HashMap<String, String> {
         let Some((key, value)) = line.split_once('=') else {
             continue; // blank line between multi-value properties
         };
-        props.entry(key.to_owned()).or_insert_with(|| value.to_owned());
+        props
+            .entry(key.to_owned())
+            .or_insert_with(|| value.to_owned());
     }
     props
 }
@@ -320,9 +332,15 @@ dbus.service                                     static          -
     #[test]
     fn list_unit_files_maps_states_to_enabled_hint() {
         let states = parse_list_unit_files(LIST_UNIT_FILES_SAMPLE).unwrap();
-        assert_eq!(states.get("accounts-daemon.service").copied().flatten(), Some(true));
+        assert_eq!(
+            states.get("accounts-daemon.service").copied().flatten(),
+            Some(true)
+        );
         assert_eq!(states.get("acpid.service").copied().flatten(), Some(false));
-        assert_eq!(states.get("alsa-utils.service").copied().flatten(), Some(false)); // masked
+        assert_eq!(
+            states.get("alsa-utils.service").copied().flatten(),
+            Some(false)
+        ); // masked
         assert_eq!(states.get("dbus.service").copied().flatten(), None); // static
     }
 }

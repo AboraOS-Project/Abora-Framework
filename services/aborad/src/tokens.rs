@@ -34,7 +34,10 @@ pub enum TokenStoreError {
         source: std::io::Error,
     },
     #[error("token file `{token_file}`: {message}")]
-    BadEntry { token_file: std::path::PathBuf, message: String },
+    BadEntry {
+        token_file: std::path::PathBuf,
+        message: String,
+    },
 }
 
 /// A token record after successful authentication.
@@ -49,7 +52,9 @@ pub struct StoredToken {
 impl StoredToken {
     /// Whether this token grants `permission_id` (or `read_all`).
     pub fn grants(&self, permission_id: &str) -> bool {
-        self.permissions.iter().any(|p| p == "read_all" || p == permission_id)
+        self.permissions
+            .iter()
+            .any(|p| p == "read_all" || p == permission_id)
     }
 }
 
@@ -125,7 +130,10 @@ impl TokenStore {
     pub fn find(&self, bearer: &str) -> Option<&StoredToken> {
         let digest = Sha256::digest(bearer.as_bytes());
         let hash: [u8; 32] = digest.into();
-        self.entries.iter().find(|e| ct_eq(&e.hash, &hash)).map(|e| &e.token)
+        self.entries
+            .iter()
+            .find(|e| ct_eq(&e.hash, &hash))
+            .map(|e| &e.token)
     }
 }
 
@@ -140,12 +148,13 @@ pub fn sha256_hex(secret: &str) -> String {
 }
 
 fn decode_sha256_hex(prefixed: &str) -> Result<[u8; 32], String> {
-    let (scheme, hex) =
-        prefixed.split_once(':').ok_or_else(|| {
-            format!("secret_hash must look like `sha256:<64 hex>`, got `{prefixed}`")
-        })?;
+    let (scheme, hex) = prefixed
+        .split_once(':')
+        .ok_or_else(|| format!("secret_hash must look like `sha256:<64 hex>`, got `{prefixed}`"))?;
     if scheme != "sha256" {
-        return Err(format!("unsupported secret_hash scheme `{scheme}` (expected sha256)"));
+        return Err(format!(
+            "unsupported secret_hash scheme `{scheme}` (expected sha256)"
+        ));
     }
     if hex.len() != 64 {
         return Err(format!(
@@ -235,10 +244,7 @@ mod tests {
     fn malformed_files_are_rejected() {
         assert!(TokenStore::from_str("not toml [[[[").is_err());
         assert!(TokenStore::from_str("[tokens]\nsecret_hash = \"md5:abc\"\n").is_err());
-        assert!(TokenStore::from_str(
-            "[[tokens]]\nsecret_hash = \"sha256:short\"\n"
-        )
-        .is_err());
+        assert!(TokenStore::from_str("[[tokens]]\nsecret_hash = \"sha256:short\"\n").is_err());
         assert!(TokenStore::from_str(
             "[[tokens]]\nsecret_hash = \"sha256:zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\"\n"
         )
@@ -256,7 +262,13 @@ mod tests {
     #[test]
     fn collision_behavior_is_sound() {
         // Only a byte-for-byte identical hash matches (constant time).
-        let store = store("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", &["read_all"], "a");
-        assert!(store.find("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab").is_none());
+        let store = store(
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            &["read_all"],
+            "a",
+        );
+        assert!(store
+            .find("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab")
+            .is_none());
     }
 }

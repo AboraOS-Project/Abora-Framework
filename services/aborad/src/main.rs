@@ -17,7 +17,9 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use abora_config::{Config, ConfigError};
-use abora_core::{API_VERSION, DAEMON_NAME, DEFAULT_CONFIG_PATH, FRAMEWORK_NAME, FRAMEWORK_VERSION};
+use abora_core::{
+    API_VERSION, DAEMON_NAME, DEFAULT_CONFIG_PATH, FRAMEWORK_NAME, FRAMEWORK_VERSION,
+};
 use abora_log::{info, warn, Logger};
 
 use crate::reload::ReloadSource;
@@ -80,7 +82,9 @@ fn parse_args() -> Result<Action, String> {
             "--help" | "-h" => help = true,
             "--version" | "-V" => version = true,
             "--config" => {
-                let value = iter.next().ok_or_else(|| "--config requires a path argument".to_owned())?;
+                let value = iter
+                    .next()
+                    .ok_or_else(|| "--config requires a path argument".to_owned())?;
                 config_path = Some(PathBuf::from(value));
             }
             other => return Err(format!("unknown argument `{other}`")),
@@ -110,24 +114,35 @@ enum ConfigSource {
 fn resolve_config(explicit: Option<PathBuf>, logger: &Logger) -> Result<LoadedConfig, String> {
     if let Some(path) = explicit {
         let config = Config::load(&path).map_err(|e| format!("{e}"))?;
-        return Ok(LoadedConfig { config, source: ConfigSource::Explicit(path) });
+        return Ok(LoadedConfig {
+            config,
+            source: ConfigSource::Explicit(path),
+        });
     }
 
     if let Ok(path) = std::env::var("ABORA_CONFIG").map(PathBuf::from) {
         let config = Config::load(&path).map_err(|e| format!("{e}"))?;
-        return Ok(LoadedConfig { config, source: ConfigSource::Environment(path) });
+        return Ok(LoadedConfig {
+            config,
+            source: ConfigSource::Environment(path),
+        });
     }
 
     let default = PathBuf::from(DEFAULT_CONFIG_PATH);
     match Config::load(&default) {
-        Ok(config) => Ok(LoadedConfig { config, source: ConfigSource::Explicit(default) }),
+        Ok(config) => Ok(LoadedConfig {
+            config,
+            source: ConfigSource::Explicit(default),
+        }),
         Err(ConfigError::Io { path, .. }) if path == default && !default.exists() => {
             warn!(
                 logger,
-                "no configuration file at {}; using compiled-in defaults",
-                DEFAULT_CONFIG_PATH
+                "no configuration file at {}; using compiled-in defaults", DEFAULT_CONFIG_PATH
             );
-            Ok(LoadedConfig { config: Config::default(), source: ConfigSource::BuiltinDefaults })
+            Ok(LoadedConfig {
+                config: Config::default(),
+                source: ConfigSource::BuiltinDefaults,
+            })
         }
         Err(e) => Err(format!("{e}")),
     }
@@ -173,11 +188,12 @@ fn load_token_store(config: &Config, logger: &Logger) -> Result<Option<TokenStor
 }
 
 fn check_bind_addr(config: &Config) -> Result<SocketAddr, String> {
-    let addr: SocketAddr = config
-        .remote
-        .listen_addr
-        .parse()
-        .map_err(|_| format!("[remote] listen_addr `{}` is not a valid socket address", config.remote.listen_addr))?;
+    let addr: SocketAddr = config.remote.listen_addr.parse().map_err(|_| {
+        format!(
+            "[remote] listen_addr `{}` is not a valid socket address",
+            config.remote.listen_addr
+        )
+    })?;
 
     if !addr.ip().is_loopback() {
         return Err(format!(
@@ -212,7 +228,11 @@ fn open_updates(config: &Config, logger: &Logger) -> UpdatesState {
             UpdatesState::host(Arc::new(store))
         }
         Ok((store, Opened::Fresh)) => {
-            info!(logger, "no update state at {} yet; starting empty", path.display());
+            info!(
+                logger,
+                "no update state at {} yet; starting empty",
+                path.display()
+            );
             UpdatesState::host(Arc::new(store))
         }
         Ok((store, Opened::Recovered { backup })) => {
@@ -265,10 +285,17 @@ fn run(config_path: Option<PathBuf>) -> Result<(), String> {
         ConfigSource::BuiltinDefaults => ReloadSource::Builtin,
     };
 
-    info!(logger, "starting {DAEMON_NAME} {FRAMEWORK_VERSION} (api {API_VERSION})");
+    info!(
+        logger,
+        "starting {DAEMON_NAME} {FRAMEWORK_VERSION} (api {API_VERSION})"
+    );
     match &loaded.source {
         ConfigSource::Explicit(p) => info!(logger, "configuration loaded from {}", p.display()),
-        ConfigSource::Environment(p) => info!(logger, "configuration loaded from {} (ABORA_CONFIG)", p.display()),
+        ConfigSource::Environment(p) => info!(
+            logger,
+            "configuration loaded from {} (ABORA_CONFIG)",
+            p.display()
+        ),
         ConfigSource::BuiltinDefaults => {}
     }
     for line in config.summary() {
@@ -309,7 +336,11 @@ fn run(config_path: Option<PathBuf>) -> Result<(), String> {
 
     runtime.block_on(async {
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
-        tokio::spawn(signal_and_watch_loop(state.clone(), reload_source, shutdown_tx));
+        tokio::spawn(signal_and_watch_loop(
+            state.clone(),
+            reload_source,
+            shutdown_tx,
+        ));
         // Checks for updates now and then every [updates] check_interval.
         tokio::spawn(scheduler::run(state.clone()));
 
@@ -330,7 +361,11 @@ fn run(config_path: Option<PathBuf>) -> Result<(), String> {
 /// Runs for the lifetime of the daemon: reloads configuration on `SIGHUP`
 /// (and when watched files change on disk) and triggers a graceful shutdown
 /// on `SIGTERM`/`SIGINT`.
-async fn signal_and_watch_loop(state: SharedState, source: ReloadSource, shutdown: tokio::sync::oneshot::Sender<()>) {
+async fn signal_and_watch_loop(
+    state: SharedState,
+    source: ReloadSource,
+    shutdown: tokio::sync::oneshot::Sender<()>,
+) {
     // Seed with the current fingerprint so the first tick is not a "change".
     let mut config_seen = source.file_path().and_then(fingerprint);
     let mut token_seen = fingerprint_of_token(state.as_ref());

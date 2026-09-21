@@ -32,8 +32,8 @@ use abora_core::{Version, API_PATH_PREFIX, API_VERSION};
 
 pub use abora_sysinfo::{Architecture, CpuInfo, KernelInfo, MemoryInfo, OsInfo};
 pub use abora_update::{
-    AvailableUpdate, AvailableUpdates, Channel, MaintenanceWindow, RebootStatus, UpdateHistoryEntry,
-    UpdateStatus,
+    AvailableUpdate, AvailableUpdates, Channel, MaintenanceWindow, RebootStatus,
+    UpdateHistoryEntry, UpdateStatus,
 };
 
 /// Description of the active API version.
@@ -337,8 +337,7 @@ mod tests {
 
     #[test]
     fn error_envelope_serializes_as_spec() {
-        let body = ApiErrorBody::new(ErrorCode::NotImplemented, "planned")
-            .with_request_id("req-1");
+        let body = ApiErrorBody::new(ErrorCode::NotImplemented, "planned").with_request_id("req-1");
         let json = serde_json::to_value(&body).unwrap();
         assert_eq!(json["error"]["code"], "not_implemented");
         assert_eq!(json["error"]["message"], "planned");

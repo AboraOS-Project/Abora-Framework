@@ -12,8 +12,8 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use abora_core::{
-    CLI_NAME, DAEMON_NAME, DEFAULT_LISTEN_ADDR, DEFAULT_CONFIG_PATH, FRAMEWORK_NAME,
-    FRAMEWORK_VERSION, API_VERSION,
+    API_VERSION, CLI_NAME, DAEMON_NAME, DEFAULT_CONFIG_PATH, DEFAULT_LISTEN_ADDR, FRAMEWORK_NAME,
+    FRAMEWORK_VERSION,
 };
 
 #[derive(Parser)]
@@ -131,7 +131,9 @@ fn cmd_status(url: Option<String>, token: Option<String>) -> ExitCode {
         Ok(v) => v,
         Err(msg) => {
             eprintln!("error: could not reach {DAEMON_NAME} at {base}\n  {msg}");
-            eprintln!("hint: is the daemon running? try `cargo run -p aborad` or start the systemd unit.");
+            eprintln!(
+                "hint: is the daemon running? try `cargo run -p aborad` or start the systemd unit."
+            );
             if msg.contains("bearer token") {
                 eprintln!("hint: the daemon requires authentication; pass --token or set $ABORA_DAEMON_TOKEN.");
             }
@@ -142,23 +144,52 @@ fn cmd_status(url: Option<String>, token: Option<String>) -> ExitCode {
     let system = get_json(&format!("{base}/api/v1/system"), token.as_deref());
 
     let daemon = &health["daemon"];
-    println!("daemon:    {} {}", daemon["name"].as_str().unwrap_or("-"), version_str(&daemon["version"]));
+    println!(
+        "daemon:    {} {}",
+        daemon["name"].as_str().unwrap_or("-"),
+        version_str(&daemon["version"])
+    );
     match &version {
         Ok(v) => println!("framework: {}", version_str(&v["framework_version"])),
         Err(msg) => println!("framework: unavailable ({msg})"),
     }
-    println!("status:    {}", health["status"].as_str().unwrap_or("unknown"));
-    println!("api:       {} ({})", health["api"]["name"].as_str().unwrap_or("-"), health["api"]["path"].as_str().unwrap_or("-"));
-    println!("uptime:    {}s (daemon since {})", health["uptime_seconds"].as_u64().unwrap_or(0), health["started_at"].as_str().unwrap_or("-"));
+    println!(
+        "status:    {}",
+        health["status"].as_str().unwrap_or("unknown")
+    );
+    println!(
+        "api:       {} ({})",
+        health["api"]["name"].as_str().unwrap_or("-"),
+        health["api"]["path"].as_str().unwrap_or("-")
+    );
+    println!(
+        "uptime:    {}s (daemon since {})",
+        health["uptime_seconds"].as_u64().unwrap_or(0),
+        health["started_at"].as_str().unwrap_or("-")
+    );
 
     match system {
         Ok(sys) => {
             println!("hostname:  {}", sys["hostname"].as_str().unwrap_or("-"));
             println!("os:        {}", os_pretty(&sys));
-            println!("kernel:    {}", sys["kernel"]["release"].as_str().unwrap_or("-"));
-            println!("arch:      {} ({})", sys["architecture"].as_str().unwrap_or("-"), sys["machine"].as_str().unwrap_or("-"));
-            println!("memory:    {}/{} bytes used", sys["memory"]["used_bytes"].as_u64().unwrap_or(0), sys["memory"]["total_bytes"].as_u64().unwrap_or(0));
-            println!("uptime:    {}s (host)", sys["uptime_seconds"].as_u64().unwrap_or(0));
+            println!(
+                "kernel:    {}",
+                sys["kernel"]["release"].as_str().unwrap_or("-")
+            );
+            println!(
+                "arch:      {} ({})",
+                sys["architecture"].as_str().unwrap_or("-"),
+                sys["machine"].as_str().unwrap_or("-")
+            );
+            println!(
+                "memory:    {}/{} bytes used",
+                sys["memory"]["used_bytes"].as_u64().unwrap_or(0),
+                sys["memory"]["total_bytes"].as_u64().unwrap_or(0)
+            );
+            println!(
+                "uptime:    {}s (host)",
+                sys["uptime_seconds"].as_u64().unwrap_or(0)
+            );
         }
         Err(msg) => println!("system:    unavailable ({msg})"),
     }
@@ -332,7 +363,9 @@ fn cmd_auth_generate_token(
     println!("secret:      {secret}");
     println!("secret_hash: {hash}");
     println!();
-    println!("Append this to the file referenced by [security].token_file (e.g. /etc/abora/auth.toml):");
+    println!(
+        "Append this to the file referenced by [security].token_file (e.g. /etc/abora/auth.toml):"
+    );
     let perms = permissions
         .iter()
         .map(|p| format!("\"{p}\""))
@@ -372,8 +405,8 @@ fn random_secret(byte_len: usize) -> Result<String, String> {
     let mut bytes = vec![0u8; byte_len];
     {
         use std::io::Read;
-        let mut source =
-            std::fs::File::open("/dev/urandom").map_err(|e| format!("could not open /dev/urandom: {e}"))?;
+        let mut source = std::fs::File::open("/dev/urandom")
+            .map_err(|e| format!("could not open /dev/urandom: {e}"))?;
         source
             .read_exact(&mut bytes)
             .map_err(|e| format!("could not read /dev/urandom: {e}"))?;
@@ -404,7 +437,10 @@ mod tests {
     #[test]
     fn sha256_hex_matches_known_vector() {
         // sha256("test")
-        assert_eq!(sha256_hex("test"), "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08");
+        assert_eq!(
+            sha256_hex("test"),
+            "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+        );
     }
 
     #[test]

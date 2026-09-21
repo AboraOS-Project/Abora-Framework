@@ -24,6 +24,8 @@ use crate::tokens::TokenStore;
 /// A single privileged capability a handler requires. Every route must
 /// declare one; none may run without it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+// Every permission is a read today; `manage:*` permissions arrive with the first mutating route.
+#[allow(clippy::enum_variant_names)]
 pub enum Permission {
     ReadHealth,
     ReadVersion,
@@ -153,7 +155,12 @@ mod tests {
             Decision::Allowed
         );
         assert_eq!(
-            authorize(IpAddr::V6(Ipv6Addr::LOCALHOST), Permission::ReadHealth, None, None),
+            authorize(
+                IpAddr::V6(Ipv6Addr::LOCALHOST),
+                Permission::ReadHealth,
+                None,
+                None
+            ),
             Decision::Allowed
         );
     }
@@ -184,7 +191,12 @@ mod tests {
     fn unknown_token_is_401() {
         let store = store("right", &["read_all"]);
         assert_eq!(
-            authorize(LOOPBACK, Permission::ReadHealth, Some("wrong"), Some(&store)),
+            authorize(
+                LOOPBACK,
+                Permission::ReadHealth,
+                Some("wrong"),
+                Some(&store)
+            ),
             Decision::AuthenticationRequired
         );
     }
@@ -247,6 +259,8 @@ mod tests {
             .unwrap();
         assert_eq!(denial.error.code, abora_api::ErrorCode::Forbidden);
 
-        assert!(Decision::Allowed.into_denial(Permission::ReadHealth).is_none());
+        assert!(Decision::Allowed
+            .into_denial(Permission::ReadHealth)
+            .is_none());
     }
 }

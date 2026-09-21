@@ -12,7 +12,7 @@ use abora_api::{
     ApiErrorBody, ApiVersionInfo, DaemonInfo, ErrorCode, HealthResponse, HealthStatus,
     ServiceDetail, ServiceState, SystemResponse, UpdatesResponse, VersionResponse,
 };
-use abora_core::{DAEMON_NAME, FRAMEWORK_NAME, Version};
+use abora_core::{Version, DAEMON_NAME, FRAMEWORK_NAME};
 
 use crate::errors::ApiError;
 use crate::state::SharedState;
@@ -59,7 +59,10 @@ pub async fn system(State(state): State<SharedState>) -> Result<Json<SystemRespo
 
     let (hostname_override, description) = {
         let config = state.config.read().expect("config lock poisoned");
-        (config.system.hostname.clone(), config.system.description.clone())
+        (
+            config.system.hostname.clone(),
+            config.system.description.clone(),
+        )
     };
     let hostname = hostname_override
         .clone()
@@ -90,7 +93,9 @@ fn bad_request(msg: impl Into<String>) -> ApiError {
 /// Parse the `GET /api/v1/services` query string. Unknown parameters and bad
 /// values are `400` with the normal error envelope rather than being ignored,
 /// so a typo like `?stat=failed` never silently returns everything.
-fn parse_service_query(params: &HashMap<String, String>) -> Result<abora_services::ServiceQuery, ApiError> {
+fn parse_service_query(
+    params: &HashMap<String, String>,
+) -> Result<abora_services::ServiceQuery, ApiError> {
     let mut query = abora_services::ServiceQuery::default();
     for (key, value) in params {
         match key.as_str() {
@@ -163,7 +168,10 @@ pub async fn services(
     let units = abora_services::collect().map_err(|e| services_unavailable(&state, e))?;
     let total = query.total_matching(&units);
     Ok((
-        AppendHeaders([(HeaderName::from_static("x-total-count"), HeaderValue::from(total))]),
+        AppendHeaders([(
+            HeaderName::from_static("x-total-count"),
+            HeaderValue::from(total),
+        )]),
         Json(query.apply(&units)),
     ))
 }
@@ -177,13 +185,16 @@ pub async fn service_detail(
     Path(name): Path<String>,
 ) -> Result<Json<ServiceDetail>, ApiError> {
     if !abora_services::validate_unit_name(&name) {
-        return Err(bad_request("the service name must be a unit name ending in `.service`"));
+        return Err(bad_request(
+            "the service name must be a unit name ending in `.service`",
+        ));
     }
     match abora_services::detail(&name) {
         Ok(detail) => Ok(Json(detail)),
-        Err(abora_services::ServicesError::NotFound(n)) => {
-            Err(ApiError(ApiErrorBody::new(ErrorCode::NotFound, format!("no such service: {n}"))))
-        }
+        Err(abora_services::ServicesError::NotFound(n)) => Err(ApiError(ApiErrorBody::new(
+            ErrorCode::NotFound,
+            format!("no such service: {n}"),
+        ))),
         Err(e) => Err(services_unavailable(&state, e)),
     }
 }

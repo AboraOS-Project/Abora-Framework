@@ -21,14 +21,23 @@ impl Logo {
         if width == 0 || height == 0 || data.len() != 12 + width * height * 4 {
             return Err("logo size does not match its header".into());
         }
-        Ok(Self { width, height, rgba: data[12..].to_vec() })
+        Ok(Self {
+            width,
+            height,
+            rgba: data[12..].to_vec(),
+        })
     }
 
     fn texel(&self, x: usize, y: usize) -> [u32; 4] {
         let i = (y.min(self.height - 1) * self.width + x.min(self.width - 1)) * 4;
         let a = self.rgba[i + 3] as u32;
         // Premultiply so transparent pixels do not bleed their colour.
-        [self.rgba[i] as u32 * a, self.rgba[i + 1] as u32 * a, self.rgba[i + 2] as u32 * a, a * 255]
+        [
+            self.rgba[i] as u32 * a,
+            self.rgba[i + 1] as u32 * a,
+            self.rgba[i + 2] as u32 * a,
+            a * 255,
+        ]
     }
 
     /// Colour and alpha at destination pixel (`dx`, `dy`) of a `dw`x`dh` box (bilinear).
@@ -38,7 +47,12 @@ impl Logo {
         let sy = ((2 * dy + 1) * self.height * 128 / dh) as i64 - 128;
         let (sx, sy) = (sx.max(0) as usize, sy.max(0) as usize);
         let (x0, y0, fx, fy) = (sx / 256, sy / 256, (sx % 256) as u32, (sy % 256) as u32);
-        let (t00, t10, t01, t11) = (self.texel(x0, y0), self.texel(x0 + 1, y0), self.texel(x0, y0 + 1), self.texel(x0 + 1, y0 + 1));
+        let (t00, t10, t01, t11) = (
+            self.texel(x0, y0),
+            self.texel(x0 + 1, y0),
+            self.texel(x0, y0 + 1),
+            self.texel(x0 + 1, y0 + 1),
+        );
         let mut out = [0u64; 4];
         for c in 0..4 {
             let top = t00[c] as u64 * (256 - fx) as u64 + t10[c] as u64 * fx as u64;
@@ -60,7 +74,11 @@ mod tests {
     use super::*;
 
     fn logo(px: &[[u8; 4]], w: usize, h: usize) -> Logo {
-        Logo { width: w, height: h, rgba: px.iter().flatten().copied().collect() }
+        Logo {
+            width: w,
+            height: h,
+            rgba: px.iter().flatten().copied().collect(),
+        }
     }
 
     #[test]
@@ -71,9 +89,21 @@ mod tests {
 
     #[test]
     fn transparent_pixels_stay_transparent_and_do_not_bleed_colour() {
-        let l = logo(&[[255, 0, 0, 0], [0, 255, 0, 255], [255, 0, 0, 0], [0, 255, 0, 255]], 2, 2);
+        let l = logo(
+            &[
+                [255, 0, 0, 0],
+                [0, 255, 0, 255],
+                [255, 0, 0, 0],
+                [0, 255, 0, 255],
+            ],
+            2,
+            2,
+        );
         let (r, _, _, a) = l.sample(2, 0, 4, 4);
-        assert!(a > 0 && r == 0, "edge sample must be green only, got r={r} a={a}");
+        assert!(
+            a > 0 && r == 0,
+            "edge sample must be green only, got r={r} a={a}"
+        );
         assert_eq!(l.sample(0, 0, 4, 4).3, 0);
     }
 }

@@ -10,7 +10,8 @@ const SHIPPED_DEFAULT: &str = include_str!("../../../config/abora.toml.default")
 
 #[test]
 fn shipped_default_matches_config_default() {
-    let shipped = Config::from_str(SHIPPED_DEFAULT).expect("shipped default must parse and validate");
+    let shipped =
+        Config::from_str(SHIPPED_DEFAULT).expect("shipped default must parse and validate");
     assert_eq!(shipped, Config::default());
 }
 

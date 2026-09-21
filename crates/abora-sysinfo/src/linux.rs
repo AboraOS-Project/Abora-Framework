@@ -67,10 +67,13 @@ fn read(path: &str) -> Result<String, SysInfoError> {
 
 /// Parse the first field of `/proc/uptime`, which is seconds as a float.
 pub(crate) fn parse_uptime(text: &str) -> Result<Duration, SysInfoError> {
-    let token = text.split_whitespace().next().ok_or_else(|| SysInfoError::Parse {
-        what: "/proc/uptime".to_owned(),
-        detail: "empty file".to_owned(),
-    })?;
+    let token = text
+        .split_whitespace()
+        .next()
+        .ok_or_else(|| SysInfoError::Parse {
+            what: "/proc/uptime".to_owned(),
+            detail: "empty file".to_owned(),
+        })?;
     let secs: f64 = token.parse().map_err(|_| SysInfoError::Parse {
         what: "/proc/uptime".to_owned(),
         detail: format!("`{token}` is not a number"),
@@ -91,16 +94,23 @@ pub(crate) fn parse_meminfo(text: &str) -> Result<MemoryInfo, SysInfoError> {
         let Some((key, rest)) = line.split_once(':') else {
             continue;
         };
-        let Some(value) = rest.split_whitespace().next().and_then(|v| v.parse::<u64>().ok()) else {
+        let Some(value) = rest
+            .split_whitespace()
+            .next()
+            .and_then(|v| v.parse::<u64>().ok())
+        else {
             continue;
         };
         fields.insert(key.trim(), value);
     }
 
-    let total = fields.get("MemTotal").copied().ok_or_else(|| SysInfoError::Parse {
-        what: "/proc/meminfo".to_owned(),
-        detail: "MemTotal is missing".to_owned(),
-    })?;
+    let total = fields
+        .get("MemTotal")
+        .copied()
+        .ok_or_else(|| SysInfoError::Parse {
+            what: "/proc/meminfo".to_owned(),
+            detail: "MemTotal is missing".to_owned(),
+        })?;
     let free = fields.get("MemFree").copied().unwrap_or(0);
     let available = fields.get("MemAvailable").copied().unwrap_or(free);
     let swap_total = fields.get("SwapTotal").copied().unwrap_or(0);
@@ -186,10 +196,8 @@ pub(crate) fn parse_cpuinfo(text: &str) -> CpuInfo {
                     model = Some(value.to_owned());
                 }
             }
-            "cpu cores" => {
-                if physical_cores.is_none() {
-                    physical_cores = value.parse::<usize>().ok();
-                }
+            "cpu cores" if physical_cores.is_none() => {
+                physical_cores = value.parse::<usize>().ok();
             }
             _ => {}
         }

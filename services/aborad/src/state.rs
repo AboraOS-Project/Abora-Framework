@@ -40,7 +40,12 @@ impl AppState {
         Self::with_updates(config, logger, tokens, UpdatesState::disabled())
     }
 
-    pub fn with_updates(config: Config, logger: Logger, tokens: Option<TokenStore>, updates: UpdatesState) -> Arc<Self> {
+    pub fn with_updates(
+        config: Config,
+        logger: Logger,
+        tokens: Option<TokenStore>,
+        updates: UpdatesState,
+    ) -> Arc<Self> {
         Arc::new(Self {
             updates,
             started_at_rfc3339: abora_log::rfc3339_now(),
@@ -80,7 +85,12 @@ impl CommandRunner for NoChecks {
 impl UpdatesState {
     /// The real thing: host packages (apt) with the given store.
     pub fn host(store: Arc<UpdateStore>) -> Self {
-        Self { provider: Box::new(HostPackageProvider::new(store.clone())), store, available: RwLock::new(Vec::new()), schedule: RwLock::new(None) }
+        Self {
+            provider: Box::new(HostPackageProvider::new(store.clone())),
+            store,
+            available: RwLock::new(Vec::new()),
+            schedule: RwLock::new(None),
+        }
     }
 
     /// Never runs a command and never touches the disk or `/var/run`. Used by tests.
@@ -93,7 +103,12 @@ impl UpdatesState {
             std::path::PathBuf::from("/nonexistent/abora-reboot-required"),
             abora_log::rfc3339_now,
         );
-        Self { store, provider: Box::new(provider), available: RwLock::new(Vec::new()), schedule: RwLock::new(None) }
+        Self {
+            store,
+            provider: Box::new(provider),
+            available: RwLock::new(Vec::new()),
+            schedule: RwLock::new(None),
+        }
     }
 
     /// Check for updates now (this runs `apt-get`, so call it off the async threads).
@@ -116,9 +131,16 @@ impl UpdatesState {
         UpdatesResponse {
             status: self.provider.status().ok(),
             last_check: self.store.last_check(),
-            reboot: self.provider.reboot_required().unwrap_or_else(|_| self.store.reboot()),
+            reboot: self
+                .provider
+                .reboot_required()
+                .unwrap_or_else(|_| self.store.reboot()),
             schedule: self.schedule.read().expect("updates lock poisoned").clone(),
-            available: self.available.read().expect("updates lock poisoned").clone(),
+            available: self
+                .available
+                .read()
+                .expect("updates lock poisoned")
+                .clone(),
             history: self.store.history(),
         }
     }
@@ -145,23 +167,39 @@ mod tests {
             std::path::PathBuf::from("/nonexistent/abora-reboot-required"),
             || "2026-09-21T05:00:00Z".to_owned(),
         );
-        let updates = UpdatesState { store, provider: Box::new(provider), available: RwLock::new(Vec::new()), schedule: RwLock::new(None) };
+        let updates = UpdatesState {
+            store,
+            provider: Box::new(provider),
+            available: RwLock::new(Vec::new()),
+            schedule: RwLock::new(None),
+        };
 
-        assert!(updates.response().status.is_none(), "nothing claimed before the first check");
+        assert!(
+            updates.response().status.is_none(),
+            "nothing claimed before the first check"
+        );
         assert_eq!(updates.refresh(&Channel::Stable), Ok(1));
 
         let r = updates.response();
         assert_eq!(r.last_check.as_deref(), Some("2026-09-21T05:00:00Z"));
         assert_eq!(r.available.len(), 1);
         assert_eq!(r.available[0].component, "openssl");
-        assert_eq!(r.status, Some(UpdateStatus::UpdateAvailable { versions: vec!["openssl 3.0.13-0ubuntu3.5".into()] }));
+        assert_eq!(
+            r.status,
+            Some(UpdateStatus::UpdateAvailable {
+                versions: vec!["openssl 3.0.13-0ubuntu3.5".into()]
+            })
+        );
     }
 
     #[test]
     fn a_failed_refresh_reports_an_error_status_and_keeps_the_old_list() {
         let updates = UpdatesState::disabled();
         assert!(updates.refresh(&Channel::Stable).is_err());
-        assert!(matches!(updates.response().status, Some(UpdateStatus::Error { .. })));
+        assert!(matches!(
+            updates.response().status,
+            Some(UpdateStatus::Error { .. })
+        ));
         assert!(updates.response().available.is_empty());
     }
 }

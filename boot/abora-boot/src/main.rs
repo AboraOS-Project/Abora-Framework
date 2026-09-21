@@ -78,12 +78,19 @@ fn parse_kmsg(record: &str) -> Option<String> {
     let first = record.lines().next()?;
     let (meta, message) = first.split_once(';')?;
     let usec: u64 = meta.split(',').nth(2)?.parse().ok()?;
-    Some(format!("[{:>5}.{:03}] {}", usec / 1_000_000, (usec / 1000) % 1000, message.trim_end()))
+    Some(format!(
+        "[{:>5}.{:03}] {}",
+        usec / 1_000_000,
+        (usec / 1000) % 1000,
+        message.trim_end()
+    ))
 }
 
 fn spawn_kmsg(tx: Sender<Event>) {
     thread::spawn(move || {
-        let Ok(mut file) = OpenOptions::new().read(true).open("/dev/kmsg") else { return };
+        let Ok(mut file) = OpenOptions::new().read(true).open("/dev/kmsg") else {
+            return;
+        };
         // Each read() on /dev/kmsg returns exactly one record.
         let mut chunk = [0u8; 8192];
         loop {
@@ -142,18 +149,30 @@ impl Screen {
             text_w = w - 3 * margin - size;
         }
         canvas.flush_all();
-        Self { canvas, font, x: margin, y: margin, w: text_w, h: h - 2 * margin, lines: VecDeque::new() }
+        Self {
+            canvas,
+            font,
+            x: margin,
+            y: margin,
+            w: text_w,
+            h: h - 2 * margin,
+            lines: VecDeque::new(),
+        }
     }
 
     fn push(&mut self, text: &str) {
         let cols = (self.w / self.font.width()).max(8);
-        let chars: Vec<char> = text.chars().map(|c| if c == '\t' { ' ' } else { c }).collect();
+        let chars: Vec<char> = text
+            .chars()
+            .map(|c| if c == '\t' { ' ' } else { c })
+            .collect();
         if chars.is_empty() {
             self.lines.push_back(String::new());
         }
         for (i, chunk) in chars.chunks(cols).enumerate() {
             let s: String = chunk.iter().collect();
-            self.lines.push_back(if i == 0 { s } else { format!("  {s}") });
+            self.lines
+                .push_back(if i == 0 { s } else { format!("  {s}") });
         }
         while self.lines.len() > MAX_LINES {
             self.lines.pop_front();
@@ -163,11 +182,13 @@ impl Screen {
     /// Redraw the text area (only the last lines that fit) and send it to the screen.
     fn draw(&mut self) {
         let ch = self.font.height();
-        self.canvas.fill_rect(self.x, self.y, self.w, self.h, BACKGROUND);
+        self.canvas
+            .fill_rect(self.x, self.y, self.w, self.h, BACKGROUND);
         let rows = self.h / ch;
         let skip = self.lines.len().saturating_sub(rows);
         for (row, text) in self.lines.iter().skip(skip).enumerate() {
-            self.canvas.text(&self.font, 1, self.x, self.y + row * ch, text, TEXT);
+            self.canvas
+                .text(&self.font, 1, self.x, self.y + row * ch, text, TEXT);
         }
         self.canvas.flush_rows(self.y, self.y + self.h);
     }
@@ -185,7 +206,9 @@ fn run() -> Result<(), String> {
     // serial console so its log is still complete.
     let mut screen = match Canvas::open(&args.fb) {
         Ok(canvas) => {
-            let logo = logo::Logo::load(&args.logo).map_err(|e| eprintln!("abora-boot: logo: {e}")).ok();
+            let logo = logo::Logo::load(&args.logo)
+                .map_err(|e| eprintln!("abora-boot: logo: {e}"))
+                .ok();
             Some(Screen::new(canvas, font, logo))
         }
         Err(e) => {
@@ -233,7 +256,10 @@ mod tests {
     #[test]
     fn kmsg_records_are_formatted_with_a_timestamp() {
         let rec = "6,339,5140900,-;NET: Registered PF_INET\n SUBSYSTEM=net\n";
-        assert_eq!(parse_kmsg(rec).unwrap(), "[    5.140] NET: Registered PF_INET");
+        assert_eq!(
+            parse_kmsg(rec).unwrap(),
+            "[    5.140] NET: Registered PF_INET"
+        );
         assert!(parse_kmsg("garbage").is_none());
     }
 }

@@ -22,8 +22,8 @@ use abora_core::Version;
 
 use crate::store::UpdateStore;
 use crate::{
-    AvailableUpdate, AvailableUpdates, Channel, RebootStatus, UpdateError, UpdateHistoryEntry, UpdateProvider,
-    UpdateStatus,
+    AvailableUpdate, AvailableUpdates, Channel, RebootStatus, UpdateError, UpdateHistoryEntry,
+    UpdateProvider, UpdateStatus,
 };
 
 /// How long an `apt-get` simulation may run before it is killed.
@@ -60,7 +60,10 @@ impl CommandRunner for SystemRunner {
                 Ok(None) if started.elapsed() > COMMAND_TIMEOUT => {
                     let _ = child.kill();
                     let _ = child.wait();
-                    return Err(format!("{program} timed out after {}s", COMMAND_TIMEOUT.as_secs()));
+                    return Err(format!(
+                        "{program} timed out after {}s",
+                        COMMAND_TIMEOUT.as_secs()
+                    ));
                 }
                 Ok(None) => std::thread::sleep(Duration::from_millis(50)),
                 Err(e) => return Err(format!("waiting for {program}: {e}")),
@@ -91,7 +94,9 @@ fn valid_package_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 200
         && !name.starts_with(['-', '.'])
-        && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "+-.:".contains(c))
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "+-.:".contains(c))
 }
 
 /// Parse the `Inst` lines of `apt-get -s` output. Anything else is ignored, and so is any
@@ -125,7 +130,12 @@ fn parse_inst_line(line: &str) -> Option<PackageUpgrade> {
     if to.is_empty() {
         return None;
     }
-    Some(PackageUpgrade { name: name.to_owned(), from, to: to.to_owned(), source: source.to_owned() })
+    Some(PackageUpgrade {
+        name: name.to_owned(),
+        from,
+        to: to.to_owned(),
+        source: source.to_owned(),
+    })
 }
 
 /// Best-effort semantic version from a Debian version like `2:1.4.7-3ubuntu2`: the epoch is
@@ -133,8 +143,17 @@ fn parse_inst_line(line: &str) -> Option<PackageUpgrade> {
 /// The exact Debian string is always kept in the update's summary.
 fn version_from_debian(version: &str) -> Version {
     let no_epoch = version.split_once(':').map_or(version, |(_, v)| v);
-    let mut parts = no_epoch.split(|c: char| !c.is_ascii_digit() && c != '.').next().unwrap_or("").split('.');
-    let mut next = || parts.next().and_then(|p| p.parse::<u64>().ok()).unwrap_or(0);
+    let mut parts = no_epoch
+        .split(|c: char| !c.is_ascii_digit() && c != '.')
+        .next()
+        .unwrap_or("")
+        .split('.');
+    let mut next = || {
+        parts
+            .next()
+            .and_then(|p| p.parse::<u64>().ok())
+            .unwrap_or(0)
+    };
     Version::new(next(), next(), next())
 }
 
@@ -157,7 +176,12 @@ pub struct HostPackageProvider {
 impl HostPackageProvider {
     /// A provider using the real system: `apt-get`, `/var/run/reboot-required` and the wall clock.
     pub fn new(store: Arc<UpdateStore>) -> Self {
-        Self::with_parts(store, Box::new(SystemRunner), "/var/run/reboot-required".into(), abora_log::rfc3339_now)
+        Self::with_parts(
+            store,
+            Box::new(SystemRunner),
+            "/var/run/reboot-required".into(),
+            abora_log::rfc3339_now,
+        )
     }
 
     /// Full control over the parts, for tests.
@@ -167,7 +191,13 @@ impl HostPackageProvider {
         reboot_marker: PathBuf,
         now: fn() -> String,
     ) -> Self {
-        Self { store, runner, reboot_marker, now, last: Mutex::new(None) }
+        Self {
+            store,
+            runner,
+            reboot_marker,
+            now,
+            last: Mutex::new(None),
+        }
     }
 
     fn set_last(&self, value: LastCheck) {
@@ -182,7 +212,10 @@ fn store_err(e: crate::store::StoreError) -> UpdateError {
 impl UpdateProvider for HostPackageProvider {
     /// Host packages have no channels: the `channel` argument is only echoed back.
     fn check(&self, channel: &Channel) -> Result<AvailableUpdates, UpdateError> {
-        let output = match self.runner.run("apt-get", &["-s", "-o", "Debug::NoLocking=1", "upgrade"]) {
+        let output = match self
+            .runner
+            .run("apt-get", &["-s", "-o", "Debug::NoLocking=1", "upgrade"])
+        {
             Ok(out) => out,
             Err(message) => {
                 self.set_last(LastCheck::Failed(message.clone()));
@@ -190,7 +223,12 @@ impl UpdateProvider for HostPackageProvider {
             }
         };
         let upgrades = parse_simulation(&output);
-        self.set_last(LastCheck::Updates(upgrades.iter().map(|u| format!("{} {}", u.name, u.to)).collect()));
+        self.set_last(LastCheck::Updates(
+            upgrades
+                .iter()
+                .map(|u| format!("{} {}", u.name, u.to))
+                .collect(),
+        ));
         self.store.record_check((self.now)()).map_err(store_err)?;
 
         let updates = upgrades
@@ -210,7 +248,10 @@ impl UpdateProvider for HostPackageProvider {
                 checksums: None,
             })
             .collect();
-        Ok(AvailableUpdates { channel: channel.clone(), updates })
+        Ok(AvailableUpdates {
+            channel: channel.clone(),
+            updates,
+        })
     }
 
     /// Status as of the last `check`. Before any check has run there is nothing honest to say,
@@ -228,7 +269,9 @@ impl UpdateProvider for HostPackageProvider {
         let current = self.store.reboot();
         if !self.reboot_marker.exists() {
             if current.required {
-                self.store.set_reboot(RebootStatus::default()).map_err(store_err)?;
+                self.store
+                    .set_reboot(RebootStatus::default())
+                    .map_err(store_err)?;
             }
             return Ok(RebootStatus::default());
         }
@@ -280,14 +323,26 @@ Inst broken line without parens
     impl CommandRunner for Fake {
         fn run(&self, program: &str, args: &[&str]) -> Result<String, String> {
             assert_eq!(program, "apt-get");
-            assert_eq!(args, ["-s", "-o", "Debug::NoLocking=1", "upgrade"], "fixed, read-only arguments");
+            assert_eq!(
+                args,
+                ["-s", "-o", "Debug::NoLocking=1", "upgrade"],
+                "fixed, read-only arguments"
+            );
             self.0.clone()
         }
     }
 
-    fn provider(result: Result<String, String>, marker: &str) -> (HostPackageProvider, Arc<UpdateStore>) {
+    fn provider(
+        result: Result<String, String>,
+        marker: &str,
+    ) -> (HostPackageProvider, Arc<UpdateStore>) {
         let store = Arc::new(UpdateStore::in_memory());
-        let p = HostPackageProvider::with_parts(store.clone(), Box::new(Fake(result)), marker.into(), || "2026-09-21T04:00:00Z".into());
+        let p = HostPackageProvider::with_parts(
+            store.clone(),
+            Box::new(Fake(result)),
+            marker.into(),
+            || "2026-09-21T04:00:00Z".into(),
+        );
         (p, store)
     }
 
@@ -295,18 +350,31 @@ Inst broken line without parens
     fn parses_inst_lines_and_ignores_everything_else() {
         let up = parse_simulation(SAMPLE);
         let names: Vec<_> = up.iter().map(|u| u.name.as_str()).collect();
-        assert_eq!(names, ["libssl3t64", "openssl", "newdep", "libc6-dev"], "Conf, bad names and broken lines are skipped");
-        assert_eq!(up[3].source, "Ubuntu:24.04/noble-updates [amd64]", "trailing markers are not part of the source");
+        assert_eq!(
+            names,
+            ["libssl3t64", "openssl", "newdep", "libc6-dev"],
+            "Conf, bad names and broken lines are skipped"
+        );
+        assert_eq!(
+            up[3].source, "Ubuntu:24.04/noble-updates [amd64]",
+            "trailing markers are not part of the source"
+        );
         assert_eq!(up[0].from.as_deref(), Some("3.0.13-0ubuntu3.4"));
         assert_eq!(up[0].to, "3.0.13-0ubuntu3.5");
         assert!(up[0].source.contains("noble-security"));
-        assert_eq!(up[2].from, None, "a new dependency has no installed version");
+        assert_eq!(
+            up[2].from, None,
+            "a new dependency has no installed version"
+        );
         assert_eq!(up[2].to, "2:1.2-1");
     }
 
     #[test]
     fn debian_versions_map_to_best_effort_semver() {
-        assert_eq!(version_from_debian("3.0.13-0ubuntu3.5"), Version::new(3, 0, 13));
+        assert_eq!(
+            version_from_debian("3.0.13-0ubuntu3.5"),
+            Version::new(3, 0, 13)
+        );
         assert_eq!(version_from_debian("2:1.2-1"), Version::new(1, 2, 0));
         assert_eq!(version_from_debian("1.4.7+dfsg-3"), Version::new(1, 4, 7));
         assert_eq!(version_from_debian("weird"), Version::new(0, 0, 0));
@@ -315,30 +383,46 @@ Inst broken line without parens
     #[test]
     fn check_reports_updates_and_status_and_records_the_time() {
         let (p, store) = provider(Ok(SAMPLE.into()), "/nonexistent/reboot-required");
-        assert!(matches!(p.status(), Err(UpdateError::Conflict(_))), "no claim before the first check");
+        assert!(
+            matches!(p.status(), Err(UpdateError::Conflict(_))),
+            "no claim before the first check"
+        );
 
         let found = p.check(&Channel::Stable).unwrap();
         assert_eq!(found.updates.len(), 4);
-        assert!(found.updates[0].summary.starts_with("libssl3t64: 3.0.13-0ubuntu3.4 -> 3.0.13-0ubuntu3.5"));
+        assert!(found.updates[0]
+            .summary
+            .starts_with("libssl3t64: 3.0.13-0ubuntu3.4 -> 3.0.13-0ubuntu3.5"));
         assert_eq!(found.updates[0].component, "libssl3t64");
         assert_eq!(store.last_check().as_deref(), Some("2026-09-21T04:00:00Z"));
         match p.status().unwrap() {
-            UpdateStatus::UpdateAvailable { versions } => assert_eq!(versions[1], "openssl 3.0.13-0ubuntu3.5"),
+            UpdateStatus::UpdateAvailable { versions } => {
+                assert_eq!(versions[1], "openssl 3.0.13-0ubuntu3.5")
+            }
             other => panic!("expected UpdateAvailable, got {other:?}"),
         }
     }
 
     #[test]
     fn nothing_to_upgrade_is_up_to_date() {
-        let (p, _) = provider(Ok("Reading package lists...\n0 upgraded, 0 newly installed\n".into()), "/nonexistent/x");
+        let (p, _) = provider(
+            Ok("Reading package lists...\n0 upgraded, 0 newly installed\n".into()),
+            "/nonexistent/x",
+        );
         assert!(p.check(&Channel::Stable).unwrap().updates.is_empty());
         assert_eq!(p.status().unwrap(), UpdateStatus::UpToDate);
     }
 
     #[test]
     fn a_failed_check_is_an_error_status_and_does_not_touch_the_store() {
-        let (p, store) = provider(Err("apt-get exited with exit status: 100".into()), "/nonexistent/x");
-        assert!(matches!(p.check(&Channel::Stable), Err(UpdateError::Source(_))));
+        let (p, store) = provider(
+            Err("apt-get exited with exit status: 100".into()),
+            "/nonexistent/x",
+        );
+        assert!(matches!(
+            p.check(&Channel::Stable),
+            Err(UpdateError::Source(_))
+        ));
         assert!(matches!(p.status().unwrap(), UpdateStatus::Error { .. }));
         assert_eq!(store.last_check(), None);
     }
@@ -356,7 +440,10 @@ Inst broken line without parens
         std::fs::write(dir.join("reboot-required.pkgs"), "linux-image-6.8\nlibc6\n").unwrap();
         let status = p.reboot_required().unwrap();
         assert!(status.required);
-        assert_eq!(status.pending_since.as_deref(), Some("2026-09-21T04:00:00Z"));
+        assert_eq!(
+            status.pending_since.as_deref(),
+            Some("2026-09-21T04:00:00Z")
+        );
         assert!(status.reason.unwrap().contains("linux-image-6.8, libc6"));
         assert!(store.reboot().required, "remembered in the store");
 
@@ -370,7 +457,10 @@ Inst broken line without parens
     fn apply_is_refused() {
         let (p, _) = provider(Ok(SAMPLE.into()), "/nonexistent/x");
         let update = p.check(&Channel::Stable).unwrap().updates.remove(0);
-        assert!(matches!(p.apply(&update), Err(UpdateError::NotImplemented(_))));
+        assert!(matches!(
+            p.apply(&update),
+            Err(UpdateError::NotImplemented(_))
+        ));
     }
 
     #[test]
@@ -382,7 +472,10 @@ Inst broken line without parens
         let p = HostPackageProvider::new(store);
         // Either a list (possibly empty) or a reported failure: never a panic or a hang.
         match p.check(&Channel::Stable) {
-            Ok(found) => assert!(found.updates.iter().all(|u| valid_package_name(&u.component))),
+            Ok(found) => assert!(found
+                .updates
+                .iter()
+                .all(|u| valid_package_name(&u.component))),
             Err(UpdateError::Source(_)) => {}
             Err(other) => panic!("unexpected error: {other}"),
         }

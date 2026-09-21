@@ -50,7 +50,8 @@ pub fn in_window(windows: &[MaintenanceWindow], now: LocalTime) -> bool {
 
 /// Evaluate the policy for `now` (`None` = local time unknown).
 pub fn permissions(config: &Config, now: Option<LocalTime>) -> Permissions {
-    let in_maintenance_window = now.map(|t| config.maintenance.enabled && in_window(&config.maintenance.windows, t));
+    let in_maintenance_window =
+        now.map(|t| config.maintenance.enabled && in_window(&config.maintenance.windows, t));
     let in_win = in_maintenance_window == Some(true);
     Permissions {
         in_maintenance_window: now.map(|t| in_window(&config.maintenance.windows, t)),
@@ -66,7 +67,9 @@ pub fn permissions(config: &Config, now: Option<LocalTime>) -> Permissions {
 /// `[updates] check_interval` as a [`Duration`]. Falls back to the 6 hour default for a value
 /// that does not parse (validation rejects those at load time).
 pub fn check_interval(config: &Config) -> Duration {
-    Duration::from_secs(crate::parse_duration(&config.updates.check_interval).unwrap_or(6 * 60 * 60))
+    Duration::from_secs(
+        crate::parse_duration(&config.updates.check_interval).unwrap_or(6 * 60 * 60),
+    )
 }
 
 /// How soon to try again after a failed check, at most.
@@ -75,8 +78,16 @@ pub const RETRY_AFTER_FAILURE: Duration = Duration::from_secs(15 * 60);
 /// Whether the next check is due, `since_last_attempt` after the previous one.
 /// After a failure the wait is shortened to [`RETRY_AFTER_FAILURE`] (if that is shorter than
 /// the interval), so one bad moment does not silence checks for hours.
-pub fn check_is_due(since_last_attempt: Duration, last_succeeded: bool, interval: Duration) -> bool {
-    let wait = if last_succeeded { interval } else { interval.min(RETRY_AFTER_FAILURE) };
+pub fn check_is_due(
+    since_last_attempt: Duration,
+    last_succeeded: bool,
+    interval: Duration,
+) -> bool {
+    let wait = if last_succeeded {
+        interval
+    } else {
+        interval.min(RETRY_AFTER_FAILURE)
+    };
     since_last_attempt >= wait
 }
 
@@ -85,14 +96,27 @@ mod tests {
     use super::*;
 
     fn window(days: &[Weekday], start: &str, end: &str) -> MaintenanceWindow {
-        MaintenanceWindow { days: days.to_vec(), start: start.into(), end: end.into(), max_duration_minutes: None }
+        MaintenanceWindow {
+            days: days.to_vec(),
+            start: start.into(),
+            end: end.into(),
+            max_duration_minutes: None,
+        }
     }
 
     fn at(weekday: Weekday, h: u32, m: u32) -> LocalTime {
-        LocalTime { weekday, minutes: h * 60 + m }
+        LocalTime {
+            weekday,
+            minutes: h * 60 + m,
+        }
     }
 
-    fn config(automatic: bool, enabled: bool, policy: RebootPolicy, windows: Vec<MaintenanceWindow>) -> Config {
+    fn config(
+        automatic: bool,
+        enabled: bool,
+        policy: RebootPolicy,
+        windows: Vec<MaintenanceWindow>,
+    ) -> Config {
         let mut c = Config::default();
         c.updates.automatic = automatic;
         c.updates.reboot_policy = policy;
@@ -105,19 +129,31 @@ mod tests {
     fn windows_are_half_open_and_day_specific() {
         let w = [window(&[Weekday::Sunday], "02:00", "04:00")];
         assert!(!in_window(&w, at(Weekday::Sunday, 1, 59)));
-        assert!(in_window(&w, at(Weekday::Sunday, 2, 0)), "start is inclusive");
+        assert!(
+            in_window(&w, at(Weekday::Sunday, 2, 0)),
+            "start is inclusive"
+        );
         assert!(in_window(&w, at(Weekday::Sunday, 3, 59)));
-        assert!(!in_window(&w, at(Weekday::Sunday, 4, 0)), "end is exclusive");
+        assert!(
+            !in_window(&w, at(Weekday::Sunday, 4, 0)),
+            "end is exclusive"
+        );
         assert!(!in_window(&w, at(Weekday::Monday, 3, 0)), "wrong day");
     }
 
     #[test]
     fn any_of_several_windows_counts() {
-        let w = [window(&[Weekday::Saturday], "01:00", "02:00"), window(&[Weekday::Wednesday, Weekday::Thursday], "23:00", "23:59")];
+        let w = [
+            window(&[Weekday::Saturday], "01:00", "02:00"),
+            window(&[Weekday::Wednesday, Weekday::Thursday], "23:00", "23:59"),
+        ];
         assert!(in_window(&w, at(Weekday::Saturday, 1, 30)));
         assert!(in_window(&w, at(Weekday::Thursday, 23, 30)));
         assert!(!in_window(&w, at(Weekday::Friday, 23, 30)));
-        assert!(!in_window(&[], at(Weekday::Sunday, 3, 0)), "no windows means never");
+        assert!(
+            !in_window(&[], at(Weekday::Sunday, 3, 0)),
+            "no windows means never"
+        );
     }
 
     #[test]
@@ -126,11 +162,27 @@ mod tests {
         let inside = Some(at(Weekday::Sunday, 3, 0));
         let outside = Some(at(Weekday::Sunday, 12, 0));
 
-        assert!(permissions(&config(true, true, RebootPolicy::Ask, w.clone()), inside).installs_permitted);
-        assert!(!permissions(&config(true, true, RebootPolicy::Ask, w.clone()), outside).installs_permitted);
-        assert!(!permissions(&config(false, true, RebootPolicy::Ask, w.clone()), inside).installs_permitted, "automatic off");
-        assert!(!permissions(&config(true, false, RebootPolicy::Ask, w), inside).installs_permitted, "maintenance off");
-        assert!(!permissions(&config(true, true, RebootPolicy::Ask, vec![]), inside).installs_permitted, "no windows");
+        assert!(
+            permissions(&config(true, true, RebootPolicy::Ask, w.clone()), inside)
+                .installs_permitted
+        );
+        assert!(
+            !permissions(&config(true, true, RebootPolicy::Ask, w.clone()), outside)
+                .installs_permitted
+        );
+        assert!(
+            !permissions(&config(false, true, RebootPolicy::Ask, w.clone()), inside)
+                .installs_permitted,
+            "automatic off"
+        );
+        assert!(
+            !permissions(&config(true, false, RebootPolicy::Ask, w), inside).installs_permitted,
+            "maintenance off"
+        );
+        assert!(
+            !permissions(&config(true, true, RebootPolicy::Ask, vec![]), inside).installs_permitted,
+            "no windows"
+        );
     }
 
     #[test]
@@ -141,7 +193,10 @@ mod tests {
 
         let ask = config(true, true, RebootPolicy::Ask, w.clone());
         assert!(permissions(&ask, inside).reboot_permitted);
-        assert!(!permissions(&ask, outside).reboot_permitted, "ask never reboots outside a window");
+        assert!(
+            !permissions(&ask, outside).reboot_permitted,
+            "ask never reboots outside a window"
+        );
 
         let always = config(true, true, RebootPolicy::Always, w.clone());
         assert!(permissions(&always, outside).reboot_permitted);
@@ -154,7 +209,14 @@ mod tests {
     fn unknown_time_permits_nothing_except_an_always_reboot_policy() {
         let w = vec![window(&[Weekday::Sunday], "00:00", "23:59")];
         let p = permissions(&config(true, true, RebootPolicy::Ask, w.clone()), None);
-        assert_eq!(p, Permissions { in_maintenance_window: None, installs_permitted: false, reboot_permitted: false });
+        assert_eq!(
+            p,
+            Permissions {
+                in_maintenance_window: None,
+                installs_permitted: false,
+                reboot_permitted: false
+            }
+        );
         // `always` does not depend on the clock at all.
         assert!(permissions(&config(true, true, RebootPolicy::Always, w), None).reboot_permitted);
     }
@@ -162,7 +224,10 @@ mod tests {
     #[test]
     fn disabled_maintenance_never_counts_as_inside_for_policy() {
         let w = vec![window(&[Weekday::Sunday], "02:00", "04:00")];
-        let p = permissions(&config(true, false, RebootPolicy::Ask, w), Some(at(Weekday::Sunday, 3, 0)));
+        let p = permissions(
+            &config(true, false, RebootPolicy::Ask, w),
+            Some(at(Weekday::Sunday, 3, 0)),
+        );
         assert!(!p.reboot_permitted && !p.installs_permitted);
     }
 
@@ -172,9 +237,16 @@ mod tests {
         assert!(!check_is_due(Duration::from_secs(3600), true, six_hours));
         assert!(check_is_due(six_hours, true, six_hours));
         assert!(!check_is_due(Duration::from_secs(600), false, six_hours));
-        assert!(check_is_due(RETRY_AFTER_FAILURE, false, six_hours), "retry after 15 minutes, not 6 hours");
+        assert!(
+            check_is_due(RETRY_AFTER_FAILURE, false, six_hours),
+            "retry after 15 minutes, not 6 hours"
+        );
         // A short interval is never stretched by the retry rule.
-        assert!(check_is_due(Duration::from_secs(60), false, Duration::from_secs(60)));
+        assert!(check_is_due(
+            Duration::from_secs(60),
+            false,
+            Duration::from_secs(60)
+        ));
     }
 
     #[test]

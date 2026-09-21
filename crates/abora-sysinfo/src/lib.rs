@@ -214,7 +214,10 @@ mod tests {
             Architecture::from_machine("weird-cpu"),
             Architecture::Other("weird-cpu".into())
         );
-        assert_eq!(Architecture::from_machine("weird-cpu").to_string(), "weird-cpu");
+        assert_eq!(
+            Architecture::from_machine("weird-cpu").to_string(),
+            "weird-cpu"
+        );
         assert_eq!(Architecture::Aarch64.to_string(), "aarch64");
     }
 

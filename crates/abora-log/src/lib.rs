@@ -34,21 +34,19 @@ use serde_json::{json, Value};
 /// Log severity threshold. Strongly ordered: a record is emitted when its
 /// level is "at or below" the configured threshold (i.e. `info` emits
 /// `info`/`warn`/`error`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum Level {
     Off,
     Error,
     Warn,
+    #[default]
     Info,
     Debug,
     Trace,
-}
-
-impl Default for Level {
-    fn default() -> Self {
-        Level::Info
-    }
 }
 
 impl fmt::Display for Level {
@@ -104,18 +102,14 @@ impl Level {
 /// Record output encoding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum Format {
     /// One JSON object per line. Best for systemd/journald and the future
     /// Cloud log viewer.
+    #[default]
     Json,
     /// Human friendly single-line records, for interactive development.
     Text,
-}
-
-impl Default for Format {
-    fn default() -> Self {
-        Format::Json
-    }
 }
 
 impl fmt::Display for Format {
@@ -185,9 +179,7 @@ impl Logger {
     /// Whether a record at `level` would be emitted.
     pub fn enabled(&self, level: Level) -> bool {
         let threshold = self.0.level.load(Ordering::Relaxed);
-        threshold != Level::Off.as_rank()
-            && level != Level::Off
-            && level.as_rank() <= threshold
+        threshold != Level::Off.as_rank() && level != Level::Off && level.as_rank() <= threshold
     }
 
     /// Start a record at `level`, then add fields and `.emit(...)` a message.
@@ -220,7 +212,13 @@ impl Logger {
         self.record(Level::Trace).emit(format_args!("{msg}"));
     }
 
-    fn write_record(&self, level: Level, component: &str, fields: &BTreeMap<String, Value>, msg: fmt::Arguments<'_>) {
+    fn write_record(
+        &self,
+        level: Level,
+        component: &str,
+        fields: &BTreeMap<String, Value>,
+        msg: fmt::Arguments<'_>,
+    ) {
         let ts = utc_rfc3339_millis(now_since_epoch());
         let mut writer = self.0.writer.lock().expect("log writer poisoned");
         let result = match self.0.format {
@@ -253,7 +251,9 @@ fn write_json<W: Write>(
         "message": format!("{msg}"),
     });
     for (k, v) in fields {
-        obj.as_object_mut().expect("object just built").insert(k.clone(), v.clone());
+        obj.as_object_mut()
+            .expect("object just built")
+            .insert(k.clone(), v.clone());
     }
     let mut buf = serde_json::to_string(&obj).unwrap_or_else(|_| "{}".into());
     buf.push('\n');
@@ -316,7 +316,8 @@ impl<'a> RecordBuilder<'a> {
             return;
         }
         let component = self.component.as_deref().unwrap_or("framework");
-        self.logger.write_record(self.level, component, &self.fields, msg);
+        self.logger
+            .write_record(self.level, component, &self.fields, msg);
     }
 
     /// Convenience: emit an owned string message.
@@ -352,9 +353,7 @@ impl LoggerBuilder {
     }
 
     pub fn build(self) -> Logger {
-        let boxed = self
-            .writer
-            .unwrap_or_else(|| Box::new(std::io::stderr()));
+        let boxed = self.writer.unwrap_or_else(|| Box::new(std::io::stderr()));
         Logger(Arc::new(LoggerInner {
             level: AtomicU8::new(self.level.as_rank()),
             format: self.format,
@@ -382,7 +381,10 @@ pub fn install_panic_hook(logger: Logger) {
         let location = info
             .location()
             .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()));
-        let thread = std::thread::current().name().unwrap_or("<unnamed>").to_owned();
+        let thread = std::thread::current()
+            .name()
+            .unwrap_or("<unnamed>")
+            .to_owned();
 
         let mut record = logger
             .record(Level::Error)
@@ -470,14 +472,8 @@ pub fn utc_rfc3339_millis(epoch: Duration) -> String {
     let millis = epoch.subsec_millis();
     let (days, day_secs) = (secs.div_euclid(86400), secs.rem_euclid(86400));
     let (year, month, day) = civil_from_days(days);
-    let (h, mi, s) = (
-        day_secs / 3600,
-        (day_secs % 3600) / 60,
-        day_secs % 60,
-    );
-    format!(
-        "{year:04}-{month:02}-{day:02}T{h:02}:{mi:02}:{s:02}.{millis:03}Z"
-    )
+    let (h, mi, s) = (day_secs / 3600, (day_secs % 3600) / 60, day_secs % 60);
+    format!("{year:04}-{month:02}-{day:02}T{h:02}:{mi:02}:{s:02}.{millis:03}Z")
 }
 
 /// Convert days since `1970-01-01` into a `(year, month, day)` UTC civil date.
@@ -558,7 +554,7 @@ mod tests {
         }
     }
 
-#[test]
+    #[test]
     fn off_level_emits_nothing() {
         let out = capture(Level::Off, Format::Text, |l| {
             l.error("nope");
@@ -592,7 +588,10 @@ mod tests {
         });
         let line = out.trim();
         assert!(line.starts_with("20"), "got: {line}");
-        assert!(line.contains(" [cli] config ok channel=\"stable\""), "got: {line}");
+        assert!(
+            line.contains(" [cli] config ok channel=\"stable\""),
+            "got: {line}"
+        );
     }
 
     #[test]
@@ -638,7 +637,10 @@ mod tests {
     #[test]
     fn nullable_field_and_integer_field_round_trip() {
         let out = capture(Level::Info, Format::Json, |l| {
-            l.record(Level::Info).field("n", 7_i64).field("f", 2.5_f64).emit(format_args!("m"));
+            l.record(Level::Info)
+                .field("n", 7_i64)
+                .field("f", 2.5_f64)
+                .emit(format_args!("m"));
         });
         let v: Value = serde_json::from_str(out.trim()).unwrap();
         assert_eq!(v["n"], 7);
@@ -647,7 +649,14 @@ mod tests {
 
     #[test]
     fn level_from_str_round_trips() {
-        for lv in [Level::Off, Level::Error, Level::Warn, Level::Info, Level::Debug, Level::Trace] {
+        for lv in [
+            Level::Off,
+            Level::Error,
+            Level::Warn,
+            Level::Info,
+            Level::Debug,
+            Level::Trace,
+        ] {
             assert_eq!(lv.to_string().parse::<Level>().unwrap(), lv);
         }
         assert!(Level::from_str("loud").is_err());

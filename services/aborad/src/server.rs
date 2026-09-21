@@ -37,7 +37,13 @@ pub struct RequestId(pub String);
 /// Build the full router for a daemon instance. Pass the loopback boundary
 /// explicitly so that serving and testing use the same path.
 pub fn build(state: SharedState) -> Router {
-    let base_path = state.config.read().expect("config lock poisoned").api.base_path.clone();
+    let base_path = state
+        .config
+        .read()
+        .expect("config lock poisoned")
+        .api
+        .base_path
+        .clone();
 
     Router::new()
         .route(
@@ -46,7 +52,11 @@ pub fn build(state: SharedState) -> Router {
         )
         .route(
             &endpoint(&base_path, "version"),
-            with_auth(get(handlers::version), state.clone(), Permission::ReadVersion),
+            with_auth(
+                get(handlers::version),
+                state.clone(),
+                Permission::ReadVersion,
+            ),
         )
         .route(
             &endpoint(&base_path, "system"),
@@ -54,15 +64,27 @@ pub fn build(state: SharedState) -> Router {
         )
         .route(
             &endpoint(&base_path, "services"),
-            with_auth(get(handlers::services), state.clone(), Permission::ReadServices),
+            with_auth(
+                get(handlers::services),
+                state.clone(),
+                Permission::ReadServices,
+            ),
         )
         .route(
             &endpoint(&base_path, "services/{name}"),
-            with_auth(get(handlers::service_detail), state.clone(), Permission::ReadServices),
+            with_auth(
+                get(handlers::service_detail),
+                state.clone(),
+                Permission::ReadServices,
+            ),
         )
         .route(
             &endpoint(&base_path, "updates"),
-            with_auth(get(handlers::updates), state.clone(), Permission::ReadUpdates),
+            with_auth(
+                get(handlers::updates),
+                state.clone(),
+                Permission::ReadUpdates,
+            ),
         )
         .fallback(fallback)
         // Outermost: assign/carry a request id for every request, then
@@ -113,9 +135,7 @@ fn generate_request_id() -> String {
         .map(|d| d.as_nanos() as u64)
         .unwrap_or(0);
     let pid = std::process::id() as u64;
-    let mixed = nanos
-        ^ pid.rotate_left(32)
-        ^ counter.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    let mixed = nanos ^ pid.rotate_left(32) ^ counter.wrapping_mul(0x9E37_79B9_7F4A_7C15);
     hex_lower(&mixed.to_le_bytes())
 }
 
@@ -189,7 +209,10 @@ async fn inject_request_id(response: Response, id: &str) -> Response {
             if error.contains_key("request_id") {
                 false
             } else {
-                error.insert("request_id".into(), serde_json::Value::String(id.to_owned()));
+                error.insert(
+                    "request_id".into(),
+                    serde_json::Value::String(id.to_owned()),
+                );
                 true
             }
         })
@@ -236,7 +259,12 @@ where
 }
 
 /// Enforce per-operation authorization. Runs before every handler.
-async fn authorize(req: Request, next: Next, state: SharedState, permission: Permission) -> Response {
+async fn authorize(
+    req: Request,
+    next: Next,
+    state: SharedState,
+    permission: Permission,
+) -> Response {
     let peer = req
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()
@@ -351,7 +379,8 @@ mod tests {
             builder = builder.header(AUTHORIZATION, format!("Bearer {token}"));
         }
         let mut req = builder.body(axum::body::Body::empty()).unwrap();
-        req.extensions_mut().insert(ConnectInfo(SocketAddr::new(ip, 0)));
+        req.extensions_mut()
+            .insert(ConnectInfo(SocketAddr::new(ip, 0)));
         req
     }
 
@@ -392,7 +421,10 @@ mod tests {
     #[tokio::test]
     async fn health_returns_ok() {
         let app = test_app(Config::default());
-        let resp = app.oneshot(loopback_request("/api/v1/health")).await.unwrap();
+        let resp = app
+            .oneshot(loopback_request("/api/v1/health"))
+            .await
+            .unwrap();
         assert_eq!(resp.status(), 200);
         let bytes = resp.into_body().collect().await.unwrap().to_bytes();
         let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
@@ -405,7 +437,10 @@ mod tests {
     #[tokio::test]
     async fn version_returns_framework_and_daemon_versions() {
         let app = test_app(Config::default());
-        let resp = app.oneshot(loopback_request("/api/v1/version")).await.unwrap();
+        let resp = app
+            .oneshot(loopback_request("/api/v1/version"))
+            .await
+            .unwrap();
         assert_eq!(resp.status(), 200);
         let bytes = resp.into_body().collect().await.unwrap().to_bytes();
         let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
@@ -418,12 +453,15 @@ mod tests {
     #[tokio::test]
     async fn system_returns_real_machine_facts() {
         let app = test_app(Config::default());
-        let resp = app.oneshot(loopback_request("/api/v1/system")).await.unwrap();
+        let resp = app
+            .oneshot(loopback_request("/api/v1/system"))
+            .await
+            .unwrap();
         assert_eq!(resp.status(), 200);
         let bytes = resp.into_body().collect().await.unwrap().to_bytes();
         let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        assert!(v["hostname"].as_str().unwrap().len() >= 1);
-        assert!(v["kernel"]["release"].as_str().unwrap().len() >= 1);
+        assert!(!v["hostname"].as_str().unwrap().is_empty());
+        assert!(!v["kernel"]["release"].as_str().unwrap().is_empty());
         assert!(v["memory"]["total_bytes"].as_u64().unwrap() > 0);
         assert_eq!(v["architecture"].as_str().unwrap(), std::env::consts::ARCH);
     }
@@ -431,7 +469,10 @@ mod tests {
     #[tokio::test]
     async fn services_lists_systemd_units_else_503() {
         let app = test_app(Config::default());
-        let resp = app.oneshot(loopback_request("/api/v1/services")).await.unwrap();
+        let resp = app
+            .oneshot(loopback_request("/api/v1/services"))
+            .await
+            .unwrap();
         let status = resp.status();
         let bytes = resp.into_body().collect().await.unwrap().to_bytes();
         if systemctl_available() {
@@ -450,11 +491,18 @@ mod tests {
     }
 
     async fn get_json(uri: &str) -> (u16, axum::http::HeaderMap, serde_json::Value) {
-        let resp = test_app(Config::default()).oneshot(loopback_request(uri)).await.unwrap();
+        let resp = test_app(Config::default())
+            .oneshot(loopback_request(uri))
+            .await
+            .unwrap();
         let status = resp.status().as_u16();
         let headers = resp.headers().clone();
         let bytes = resp.into_body().collect().await.unwrap().to_bytes();
-        (status, headers, serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null))
+        (
+            status,
+            headers,
+            serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+        )
     }
 
     #[tokio::test]
@@ -485,8 +533,19 @@ mod tests {
         assert_eq!(total, all.as_array().unwrap().len());
 
         let (_, headers, page) = get_json("/api/v1/services?limit=1&offset=1").await;
-        assert_eq!(page.as_array().unwrap().len(), 1.min(total.saturating_sub(1)));
-        assert_eq!(headers["x-total-count"].to_str().unwrap().parse::<usize>().unwrap(), total, "count ignores paging");
+        assert_eq!(
+            page.as_array().unwrap().len(),
+            1.min(total.saturating_sub(1))
+        );
+        assert_eq!(
+            headers["x-total-count"]
+                .to_str()
+                .unwrap()
+                .parse::<usize>()
+                .unwrap(),
+            total,
+            "count ignores paging"
+        );
 
         let (_, _, none) = get_json("/api/v1/services?q=zzz-no-such-unit-zzz").await;
         assert!(none.as_array().unwrap().is_empty());
@@ -510,7 +569,10 @@ mod tests {
     async fn updates_before_any_check_reports_nothing_known() {
         let (status, _, v) = get_json("/api/v1/updates").await;
         assert_eq!(status, 200);
-        assert!(v.get("status").is_none(), "no status claimed before a check: {v}");
+        assert!(
+            v.get("status").is_none(),
+            "no status claimed before a check: {v}"
+        );
         assert!(v.get("last_check").is_none());
         assert_eq!(v["reboot"]["required"], false);
         assert_eq!(v["available"], serde_json::json!([]));
@@ -617,7 +679,10 @@ mod tests {
 
     #[tokio::test]
     async fn auth_denial_envelope_carries_request_id() {
-        let app = test_app_with_tokens(Config::default(), Some(token_store("ops", &["read:health"])));
+        let app = test_app_with_tokens(
+            Config::default(),
+            Some(token_store("ops", &["read:health"])),
+        );
         let mut req = loopback_request_with_token("/api/v1/system", "ops");
         req.headers_mut()
             .insert(X_REQUEST_ID, HeaderValue::from_static("deny-1"));
@@ -633,7 +698,10 @@ mod tests {
     async fn remote_peer_is_forbidden() {
         let app = test_app(Config::default());
         let resp = app
-            .oneshot(request_with_peer("/api/v1/health", IpAddr::V4(Ipv4Addr::new(10, 1, 2, 3))))
+            .oneshot(request_with_peer(
+                "/api/v1/health",
+                IpAddr::V4(Ipv4Addr::new(10, 1, 2, 3)),
+            ))
             .await
             .unwrap();
         assert_eq!(resp.status(), 403);
@@ -648,19 +716,33 @@ mod tests {
         cfg.api.base_path = "/api/v2".to_owned();
         let app = test_app(cfg);
 
-        let old = app.clone().oneshot(loopback_request("/api/v1/health")).await.unwrap();
+        let old = app
+            .clone()
+            .oneshot(loopback_request("/api/v1/health"))
+            .await
+            .unwrap();
         assert_eq!(old.status(), 404);
 
-        let resp = app.oneshot(loopback_request("/api/v2/health")).await.unwrap();
+        let resp = app
+            .oneshot(loopback_request("/api/v2/health"))
+            .await
+            .unwrap();
         assert_eq!(resp.status(), 200);
     }
 
     #[tokio::test]
     async fn token_required_when_store_configured() {
-        let app = test_app_with_tokens(Config::default(), Some(token_store("ops", &["read:health"])));
+        let app = test_app_with_tokens(
+            Config::default(),
+            Some(token_store("ops", &["read:health"])),
+        );
 
         // No header.
-        let resp = app.clone().oneshot(loopback_request("/api/v1/health")).await.unwrap();
+        let resp = app
+            .clone()
+            .oneshot(loopback_request("/api/v1/health"))
+            .await
+            .unwrap();
         assert_eq!(resp.status(), 401);
 
         // Wrong secret.
@@ -706,7 +788,10 @@ mod tests {
 
     #[tokio::test]
     async fn token_missing_permission_returns_error_envelope() {
-        let app = test_app_with_tokens(Config::default(), Some(token_store("ops", &["read:health"])));
+        let app = test_app_with_tokens(
+            Config::default(),
+            Some(token_store("ops", &["read:health"])),
+        );
         let resp = app
             .oneshot(loopback_request_with_token("/api/v1/system", "ops"))
             .await
@@ -714,13 +799,22 @@ mod tests {
         let bytes = resp.into_body().collect().await.unwrap().to_bytes();
         let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(v["error"]["code"], "forbidden");
-        assert!(v["error"]["message"].as_str().unwrap().contains("read:system"));
+        assert!(v["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("read:system"));
     }
 
     #[tokio::test]
     async fn read_all_token_accesses_every_route() {
-        let app = test_app_with_tokens(Config::default(), Some(token_store("admin", &["read_all"])));
-        for path in ["/api/v1/health", "/api/v1/version", "/api/v1/system", "/api/v1/services"] {
+        let app =
+            test_app_with_tokens(Config::default(), Some(token_store("admin", &["read_all"])));
+        for path in [
+            "/api/v1/health",
+            "/api/v1/version",
+            "/api/v1/system",
+            "/api/v1/services",
+        ] {
             let resp = app
                 .clone()
                 .oneshot(loopback_request_with_token(path, "admin"))

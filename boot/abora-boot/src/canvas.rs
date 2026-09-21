@@ -25,13 +25,18 @@ pub struct Canvas {
 impl Canvas {
     pub fn open(name: &str) -> Result<Self, String> {
         let sys = format!("/sys/class/graphics/{name}");
-        let read = |file: &str| fs::read_to_string(format!("{sys}/{file}")).map_err(|e| format!("{sys}/{file}: {e}"));
+        let read = |file: &str| {
+            fs::read_to_string(format!("{sys}/{file}")).map_err(|e| format!("{sys}/{file}: {e}"))
+        };
         let size = read("virtual_size")?;
         let (w, h) = size.trim().split_once(',').ok_or("bad virtual_size")?;
         let width: usize = w.parse().map_err(|_| "bad width")?;
         let height: usize = h.parse().map_err(|_| "bad height")?;
         let stride: usize = read("stride")?.trim().parse().map_err(|_| "bad stride")?;
-        let bpp: usize = read("bits_per_pixel")?.trim().parse().map_err(|_| "bad bits_per_pixel")?;
+        let bpp: usize = read("bits_per_pixel")?
+            .trim()
+            .parse()
+            .map_err(|_| "bad bits_per_pixel")?;
         if bpp != 32 {
             return Err(format!("{bpp} bits per pixel is not supported (need 32)"));
         }
@@ -42,7 +47,13 @@ impl Canvas {
             .write(true)
             .open(format!("/dev/{name}"))
             .map_err(|e| format!("/dev/{name}: {e}"))?;
-        Ok(Self { device, width, height, stride, pixels: vec![0; stride * height] })
+        Ok(Self {
+            device,
+            width,
+            height,
+            stride,
+            pixels: vec![0; stride * height],
+        })
     }
 
     pub fn width(&self) -> usize {
@@ -103,9 +114,19 @@ impl Canvas {
                 if a == 0 {
                     continue;
                 }
-                let under = if x + dx < self.width && y + dy < self.height { self.get(x + dx, y + dy) } else { continue };
-                let blend = |f: u8, u: u8| ((f as u32 * a as u32 + u as u32 * (255 - a as u32)) / 255) as u8;
-                self.put(x + dx, y + dy, Rgb(blend(r, under.0), blend(g, under.1), blend(b, under.2)));
+                let under = if x + dx < self.width && y + dy < self.height {
+                    self.get(x + dx, y + dy)
+                } else {
+                    continue;
+                };
+                let blend = |f: u8, u: u8| {
+                    ((f as u32 * a as u32 + u as u32 * (255 - a as u32)) / 255) as u8
+                };
+                self.put(
+                    x + dx,
+                    y + dy,
+                    Rgb(blend(r, under.0), blend(g, under.1), blend(b, under.2)),
+                );
             }
         }
     }
@@ -121,7 +142,11 @@ impl Canvas {
             return;
         }
         let range = top * self.stride..bottom * self.stride;
-        if let Err(e) = self.device.seek(SeekFrom::Start(range.start as u64)).and_then(|_| self.device.write_all(&self.pixels[range])) {
+        if let Err(e) = self
+            .device
+            .seek(SeekFrom::Start(range.start as u64))
+            .and_then(|_| self.device.write_all(&self.pixels[range]))
+        {
             eprintln!("abora-boot: framebuffer write failed: {e}");
         }
     }
