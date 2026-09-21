@@ -10,8 +10,8 @@ use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
 use abora_api::{
-    ApplyResponse, AvailableUpdate, Channel, ScheduleInfo, UpdateHistoryEntry, UpdateStatus,
-    UpdatesResponse,
+    ApplyResponse, AvailableUpdate, Channel, ComponentHealth, HealthStatus, ScheduleInfo,
+    UpdateHistoryEntry, UpdateStatus, UpdatesResponse,
 };
 use abora_config::schedule::{local_time, permissions, LocalTime};
 use abora_config::Config;
@@ -60,6 +60,11 @@ impl AppState {
             tokens: RwLock::new(tokens),
             started_at: Instant::now(),
         })
+    }
+
+    /// Health of each subsystem, derived from live state. Add new subsystems here.
+    pub fn components_health(&self) -> Vec<ComponentHealth> {
+        vec![self.updates.health()]
     }
 
     /// Seconds since the daemon started.
@@ -177,6 +182,21 @@ impl UpdatesState {
     /// Record what policy permits right now (called by the scheduler).
     pub fn set_schedule(&self, info: ScheduleInfo) {
         *self.schedule.write().expect("updates lock poisoned") = Some(info);
+    }
+
+    /// `degraded` when the last update check failed; otherwise `ok` (including before any check).
+    pub fn health(&self) -> ComponentHealth {
+        let (status, detail) = match self.provider.status() {
+            Ok(UpdateStatus::Error { message }) => (HealthStatus::Degraded, Some(message)),
+            // Before the first check there is nothing to be unhealthy about.
+            Err(e) => (HealthStatus::Ok, Some(e.to_string())),
+            Ok(_) => (HealthStatus::Ok, None),
+        };
+        ComponentHealth {
+            name: "updates".to_owned(),
+            status,
+            detail,
+        }
     }
 
     /// Whether a request is waiting for (or being handled by) the helper.
@@ -404,6 +424,16 @@ mod tests {
             Some(UpdateStatus::Error { .. })
         ));
         assert!(updates.response().available.is_empty());
+    }
+
+    #[test]
+    fn health_is_ok_before_a_check_and_degraded_after_a_failed_one() {
+        let updates = UpdatesState::disabled();
+        assert_eq!(updates.health().status, HealthStatus::Ok);
+        assert!(updates.refresh(&Channel::Stable).is_err());
+        let health = updates.health();
+        assert_eq!(health.status, HealthStatus::Degraded);
+        assert!(health.detail.is_some());
     }
 
     #[test]

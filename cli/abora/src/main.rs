@@ -40,10 +40,40 @@ enum Command {
         #[arg(long, value_name = "TOKEN")]
         token: Option<String>,
     },
+    /// Show update status, or apply updates (`abora updates apply`).
+    Updates(UpdatesArgs),
     /// Validate configuration files (no daemon required).
     Config(ConfigArgs),
     /// Manage daemon bearer tokens (no daemon required).
     Auth(AuthArgs),
+}
+
+#[derive(Args)]
+struct UpdatesArgs {
+    /// Daemon base URL, e.g. `http://127.0.0.1:7360`.
+    #[arg(long, value_name = "URL", global = true)]
+    url: Option<String>,
+    /// Bearer token. Defaults to $ABORA_DAEMON_TOKEN. Applying needs a token that grants `manage:updates`.
+    #[arg(long, value_name = "TOKEN", global = true)]
+    token: Option<String>,
+    /// Print the raw JSON from the daemon instead of a summary.
+    #[arg(long, global = true)]
+    json: bool,
+    #[command(subcommand)]
+    command: Option<UpdatesCommand>,
+}
+
+#[derive(Subcommand)]
+enum UpdatesCommand {
+    /// Ask the daemon to upgrade the packages the last check listed. Shows the plan and asks first.
+    Apply {
+        /// Only show what would happen; request nothing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Do not ask for confirmation (required when not running in a terminal).
+        #[arg(long, short = 'y')]
+        yes: bool,
+    },
 }
 
 #[derive(Args)]
@@ -95,6 +125,7 @@ fn main() -> ExitCode {
     match cli.command {
         Command::Version => cmd_version(),
         Command::Status { url, token } => cmd_status(url, token),
+        Command::Updates(args) => cmd_updates(args),
         Command::Config(cfg) => match cfg.command {
             ConfigCommand::Check { path } => cmd_config_check(path),
         },
@@ -234,6 +265,240 @@ fn version_str(v: &Value) -> String {
     s
 }
 
+/// How many available updates / history entries `abora updates` lists before summarising.
+const SHOW_AVAILABLE: usize = 10;
+const SHOW_HISTORY: usize = 5;
+
+/// Human-readable lines for a `GET /api/v1/updates` body. Pure, so it can be tested.
+fn format_updates(v: &Value) -> Vec<String> {
+    let mut out = Vec::new();
+    let available = v["available"].as_array().map_or(&[][..], Vec::as_slice);
+
+    let status = match v["status"]["state"].as_str() {
+        None => "unknown (no check has finished yet)".to_owned(),
+        Some("update_available") => format!("{} update(s) available", available.len()),
+        Some("up_to_date") => "up to date".to_owned(),
+        Some("installing") => "installing an update now".to_owned(),
+        Some("error") => format!(
+            "error: {}",
+            v["status"]["message"].as_str().unwrap_or("unknown")
+        ),
+        Some(other) => other.to_owned(),
+    };
+    out.push(format!("status:     {status}"));
+    out.push(format!(
+        "last check: {}",
+        v["last_check"].as_str().unwrap_or("never")
+    ));
+
+    if let Some(s) = v.get("schedule").filter(|s| s.is_object()) {
+        let window = match s["in_maintenance_window"].as_bool() {
+            Some(true) => "open",
+            Some(false) => "closed",
+            None => "unknown",
+        };
+        out.push(format!(
+            "policy:     maintenance window {window}; applying is {}; checks every {}s",
+            if s["apply_permitted"].as_bool() == Some(true) {
+                "permitted now"
+            } else {
+                "not permitted now"
+            },
+            s["check_interval_seconds"].as_u64().unwrap_or(0)
+        ));
+    }
+
+    if v["reboot"]["required"].as_bool() == Some(true) {
+        out.push(format!(
+            "reboot:     REQUIRED{}{}",
+            v["reboot"]["pending_since"]
+                .as_str()
+                .map(|t| format!(" (since {t})"))
+                .unwrap_or_default(),
+            v["reboot"]["reason"]
+                .as_str()
+                .map(|r| format!(": {r}"))
+                .unwrap_or_default()
+        ));
+    } else {
+        out.push("reboot:     not required".to_owned());
+    }
+
+    if !available.is_empty() {
+        out.push(String::new());
+        out.push("available:".to_owned());
+        for u in available.iter().take(SHOW_AVAILABLE) {
+            out.push(format!(
+                "  {}",
+                u["summary"]
+                    .as_str()
+                    .or_else(|| u["component"].as_str())
+                    .unwrap_or("-")
+            ));
+        }
+        if available.len() > SHOW_AVAILABLE {
+            out.push(format!(
+                "  ... and {} more (use --json for the full list)",
+                available.len() - SHOW_AVAILABLE
+            ));
+        }
+    }
+
+    let history = v["history"].as_array().map_or(&[][..], Vec::as_slice);
+    if !history.is_empty() {
+        out.push(String::new());
+        out.push("history (newest first):".to_owned());
+        for h in history.iter().take(SHOW_HISTORY) {
+            out.push(format!(
+                "  {} {} {}",
+                h["applied_at"].as_str().unwrap_or("-"),
+                if h["succeeded"].as_bool() == Some(true) {
+                    "ok    "
+                } else {
+                    "FAILED"
+                },
+                h["note"].as_str().unwrap_or("")
+            ));
+        }
+    }
+    out
+}
+
+fn cmd_updates(args: UpdatesArgs) -> ExitCode {
+    let base = match resolve_daemon_url(args.url) {
+        Ok(base) => base,
+        Err(msg) => {
+            eprintln!("error: {msg}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let token = args
+        .token
+        .or_else(|| std::env::var("ABORA_DAEMON_TOKEN").ok());
+
+    match args.command {
+        None => {
+            let body = match get_json(&format!("{base}/api/v1/updates"), token.as_deref()) {
+                Ok(v) => v,
+                Err(msg) => return updates_error(&base, &msg),
+            };
+            if args.json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&body).unwrap_or_default()
+                );
+            } else {
+                for line in format_updates(&body) {
+                    println!("{line}");
+                }
+            }
+            ExitCode::SUCCESS
+        }
+        Some(UpdatesCommand::Apply { dry_run, yes }) => {
+            apply_updates(&base, token.as_deref(), dry_run, yes, args.json)
+        }
+    }
+}
+
+fn updates_error(base: &str, msg: &str) -> ExitCode {
+    eprintln!("error: {msg}");
+    if msg.contains("HTTP 403") {
+        eprintln!(
+            "hint: this token does not grant the needed permission (`read:updates` to look, `manage:updates` to apply)."
+        );
+    } else if msg.contains("transport error") {
+        eprintln!("hint: is the daemon running at {base}?");
+    } else if msg.contains("bearer token") {
+        eprintln!("hint: pass --token or set $ABORA_DAEMON_TOKEN.");
+    }
+    ExitCode::FAILURE
+}
+
+/// The plan lines for an apply dry run. Pure, so it can be tested.
+fn format_plan(plan: &Value) -> Vec<String> {
+    let packages: Vec<&str> = plan["packages"]
+        .as_array()
+        .map_or(&[][..], Vec::as_slice)
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    let mut out = vec![format!("{} package(s) would be upgraded:", packages.len())];
+    for chunk in packages.chunks(6) {
+        out.push(format!("  {}", chunk.join(" ")));
+    }
+    out
+}
+
+fn apply_updates(
+    base: &str,
+    token: Option<&str>,
+    dry_run: bool,
+    yes: bool,
+    json: bool,
+) -> ExitCode {
+    use std::io::{BufRead, IsTerminal, Write};
+
+    let plan = match call_json(
+        "POST",
+        &format!("{base}/api/v1/updates/apply?dry_run=true"),
+        token,
+    ) {
+        Ok(v) => v,
+        Err(msg) => return updates_error(base, &msg),
+    };
+    if json && dry_run {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&plan).unwrap_or_default()
+        );
+    }
+    if plan["permitted"].as_bool() != Some(true) {
+        eprintln!(
+            "cannot apply now: {}",
+            plan["reason"].as_str().unwrap_or("not permitted")
+        );
+        return ExitCode::FAILURE;
+    }
+    if !json || !dry_run {
+        for line in format_plan(&plan) {
+            println!("{line}");
+        }
+    }
+    if dry_run {
+        return ExitCode::SUCCESS;
+    }
+
+    if !yes {
+        if !std::io::stdin().is_terminal() {
+            eprintln!("refusing to apply without confirmation: run in a terminal, or pass --yes");
+            return ExitCode::FAILURE;
+        }
+        print!("Apply these updates now? [y/N] ");
+        let _ = std::io::stdout().flush();
+        let mut answer = String::new();
+        let _ = std::io::stdin().lock().read_line(&mut answer);
+        if !matches!(answer.trim(), "y" | "Y" | "yes" | "YES") {
+            println!("cancelled; nothing was requested");
+            return ExitCode::FAILURE;
+        }
+    }
+
+    match call_json("POST", &format!("{base}/api/v1/updates/apply"), token) {
+        Ok(v) => {
+            if json {
+                println!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
+            } else {
+                println!(
+                    "accepted (request {}). Follow it with `abora updates`: status shows `installing`, then a history entry appears.",
+                    v["id"].as_str().unwrap_or("-")
+                );
+            }
+            ExitCode::SUCCESS
+        }
+        Err(msg) => updates_error(base, &msg),
+    }
+}
+
 fn cmd_config_check(path: Option<PathBuf>) -> ExitCode {
     let config = match load_config(path) {
         Ok(c) => c,
@@ -297,6 +562,11 @@ fn resolve_daemon_url(explicit: Option<String>) -> Result<String, String> {
 
 /// Perform a GET request and return the JSON body, with useful errors.
 fn get_json(url: &str, token: Option<&str>) -> Result<Value, String> {
+    call_json("GET", url, token)
+}
+
+/// Perform a request (`GET`, or `POST` with no body) and return the JSON body, with useful errors.
+fn call_json(method: &str, url: &str, token: Option<&str>) -> Result<Value, String> {
     // Return non-2xx responses instead of raising so we can read the API
     // error envelope out of the body.
     let config = ureq::config::Config::builder()
@@ -304,14 +574,21 @@ fn get_json(url: &str, token: Option<&str>) -> Result<Value, String> {
         .build();
     let agent = ureq::Agent::new_with_config(config);
 
-    let mut request = agent.get(url);
-    if let Some(token) = token {
-        request = request.header("Authorization", &format!("Bearer {token}"));
+    let bearer = token.map(|t| format!("Bearer {t}"));
+    let mut response = if method == "POST" {
+        let mut request = agent.post(url);
+        if let Some(bearer) = &bearer {
+            request = request.header("Authorization", bearer);
+        }
+        request.send_empty()
+    } else {
+        let mut request = agent.get(url);
+        if let Some(bearer) = &bearer {
+            request = request.header("Authorization", bearer);
+        }
+        request.call()
     }
-
-    let mut response = request
-        .call()
-        .map_err(|e| format!("transport error: {e}"))?;
+    .map_err(|e| format!("transport error: {e}"))?;
     let status = response.status().as_u16();
 
     let body = response
@@ -455,5 +732,66 @@ mod tests {
         assert_eq!(secret.len(), 64);
         assert!(secret.bytes().all(|b| b.is_ascii_hexdigit()));
         assert!(random_secret(8).is_err());
+    }
+
+    fn sample() -> Value {
+        serde_json::json!({
+            "status": { "state": "update_available", "versions": ["a 1"] },
+            "last_check": "2026-09-21T01:00:00Z",
+            "reboot": { "required": true, "reason": "kernel", "pending_since": "2026-09-21T00:30:00Z" },
+            "schedule": { "check_interval_seconds": 21600, "in_maintenance_window": true, "apply_permitted": true,
+                          "installs_permitted": false, "reboot_permitted": true },
+            "available": [ { "summary": "openssl: 1 -> 2 (x)", "component": "openssl" } ],
+            "history": [ { "applied_at": "2026-09-20T03:00:00Z", "succeeded": false, "note": "apply x: 0 package(s); boom" } ]
+        })
+    }
+
+    #[test]
+    fn updates_summary_shows_status_policy_reboot_available_and_history() {
+        let text = format_updates(&sample()).join("\n");
+        assert!(text.contains("status:     1 update(s) available"), "{text}");
+        assert!(text.contains("last check: 2026-09-21T01:00:00Z"));
+        assert!(text
+            .contains("maintenance window open; applying is permitted now; checks every 21600s"));
+        assert!(text.contains("reboot:     REQUIRED (since 2026-09-21T00:30:00Z): kernel"));
+        assert!(text.contains("  openssl: 1 -> 2 (x)"));
+        assert!(text.contains("FAILED apply x: 0 package(s); boom"));
+    }
+
+    #[test]
+    fn updates_summary_is_honest_before_the_first_check() {
+        let v =
+            serde_json::json!({ "reboot": { "required": false }, "available": [], "history": [] });
+        let text = format_updates(&v).join("\n");
+        assert!(
+            text.contains("unknown (no check has finished yet)"),
+            "{text}"
+        );
+        assert!(text.contains("last check: never"));
+        assert!(text.contains("reboot:     not required"));
+        assert!(
+            !text.contains("policy:"),
+            "no schedule yet, so no policy line"
+        );
+    }
+
+    #[test]
+    fn long_lists_are_cut_with_a_pointer_to_json() {
+        let many: Vec<Value> = (0..25)
+            .map(|i| serde_json::json!({ "summary": format!("pkg{i}") }))
+            .collect();
+        let v = serde_json::json!({ "status": { "state": "update_available" }, "available": many, "reboot": {}, "history": [] });
+        let text = format_updates(&v).join("\n");
+        assert!(text.contains("pkg9") && !text.contains("pkg10"));
+        assert!(text.contains("and 15 more (use --json"));
+    }
+
+    #[test]
+    fn the_plan_lists_packages_in_rows() {
+        let plan = serde_json::json!({ "packages": ["a", "b", "c", "d", "e", "f", "g"] });
+        assert_eq!(
+            format_plan(&plan),
+            ["7 package(s) would be upgraded:", "  a b c d e f", "  g"]
+        );
     }
 }

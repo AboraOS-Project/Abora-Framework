@@ -123,6 +123,22 @@ window and what apt still lists, runs one fixed `apt-get install --only-upgrade 
 for the intersection, writes the result, and reboots only if the reboot policy allows it. The full
 design, its safety rules and how to test it are in [docs/apply-design.md](apply-design.md).
 
+### From the command line
+
+```sh
+export ABORA_DAEMON_TOKEN=<secret>     # a token with read:updates, and manage:updates to apply
+
+abora updates                    # status, policy, reboot, what is available, recent history
+abora updates --json             # the raw API body
+abora updates apply --dry-run    # show the plan, request nothing
+abora updates apply              # show the plan, ask "[y/N]", then request it
+abora updates apply --yes        # no question (required when not run in a terminal)
+```
+
+`apply` always shows the plan first. Without `--yes` it asks for confirmation, and it refuses
+outright when there is no terminal to ask on, so a script can never apply by accident. It exits
+non-zero if the daemon refuses (nothing to apply, outside a maintenance window, already running).
+
 ## Not implemented (honestly)
 
 * **Automatic installs.** The scheduler only *reports* `installs_permitted`; nothing acts on it.

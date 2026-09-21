@@ -21,8 +21,17 @@ use crate::state::SharedState;
 
 /// `GET /api/v1/health`
 pub async fn health(State(state): State<SharedState>) -> Json<HealthResponse> {
+    let components = state.components_health();
+    let status = if components
+        .iter()
+        .any(|c| c.status == HealthStatus::Degraded)
+    {
+        HealthStatus::Degraded
+    } else {
+        HealthStatus::Ok
+    };
     Json(HealthResponse {
-        status: HealthStatus::Ok,
+        status,
         daemon: DaemonInfo {
             name: DAEMON_NAME.to_owned(),
             version: Version::current(),
@@ -30,9 +39,7 @@ pub async fn health(State(state): State<SharedState>) -> Json<HealthResponse> {
         api: ApiVersionInfo::current(),
         uptime_seconds: state.uptime_seconds(),
         started_at: state.started_at_rfc3339.clone(),
-        // Components register as subsystems are implemented; empty today is
-        // honest, not a lie.
-        components: Vec::new(),
+        components,
     })
 }
 

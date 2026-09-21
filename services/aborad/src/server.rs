@@ -455,7 +455,9 @@ mod tests {
         assert_eq!(v["status"], "ok");
         assert_eq!(v["daemon"]["name"], "aborad");
         assert_eq!(v["api"]["name"], "v1");
-        assert_eq!(v["components"].as_array().unwrap().len(), 0);
+        let components = v["components"].as_array().unwrap();
+        assert_eq!(components.len(), 1);
+        assert_eq!(components[0]["name"], "updates");
     }
 
     #[tokio::test]

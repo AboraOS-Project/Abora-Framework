@@ -38,12 +38,16 @@ the route's permission). With no token file configured, loopback is trusted
   "api": { "name": "v1", "path": "/api/v1" },
   "uptime_seconds": 12,
   "started_at": "2026-09-16T10:00:00.000Z",
-  "components": []
+  "components": [
+    { "name": "updates", "status": "ok" }
+  ]
 }
 ```
 
-`status` is `ok`, `degraded`, or `maintenance`. `components` grows as
-subsystems register a health check.
+`status` is `ok`, `degraded`, or `maintenance`. Overall `status` is `degraded`
+when any component is degraded. `components` grows as subsystems register a
+health check; today that is `updates` (degraded when the last update check
+failed, with the error in `detail`).
 
 ## `GET /api/v1/version`
 

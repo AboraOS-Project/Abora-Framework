@@ -58,8 +58,20 @@ $B/aborad --config /etc/abora/abora.toml > /tmp/aborad.log 2>&1 &
 sleep 3
 API=http://127.0.0.1:7396/api/v1; H="Authorization: Bearer $SECRET"
 curl -s -H "$H" $API/updates | python3 -c "import sys,json; d=json.load(sys.stdin); print('found:', [u['component'] for u in d['available']], '| status:', d['status']['state'])"
-echo "dry run: $(curl -s -X POST -H "$H" "$API/updates/apply?dry_run=true")"
-echo "apply:   $(curl -s -w ' [%{http_code}]' -X POST -H "$H" $API/updates/apply)"
+fail() { echo "FAIL: $*" >&2; exit 1; }
+CLI="$B/abora updates --url http://127.0.0.1:7396 --token $SECRET"
+echo "-- abora updates:"; $CLI | tee /tmp/cli-status.txt
+grep -q "1 update(s) available" /tmp/cli-status.txt || fail "abora updates did not show the available update"
+grep -q "abora-testpkg: 1.0 -> 2.0" /tmp/cli-status.txt || fail "abora updates did not list the package"
+echo "-- abora updates apply --dry-run:"; $CLI apply --dry-run | tee /tmp/cli-plan.txt
+grep -q "1 package(s) would be upgraded" /tmp/cli-plan.txt || fail "the dry run did not show the plan"
+[ ! -e /var/lib/abora/apply-request.json ] || fail "a dry run must not create a request"
+# Without a terminal and without --yes the CLI must refuse to change anything.
+if $CLI apply </dev/null >/tmp/cli-noyes.txt 2>&1; then fail "apply ran without confirmation"; fi
+grep -q "without confirmation" /tmp/cli-noyes.txt || fail "no explanation for the refusal"
+[ ! -e /var/lib/abora/apply-request.json ] || fail "a refused apply must not create a request"
+echo "ok: status, dry run and the no-confirmation refusal behave"
+echo "-- abora updates apply --yes:"; $CLI apply --yes
 ls -l /var/lib/abora/apply-request.json
 
 step "run the real helper (what the systemd path unit would start)"
@@ -67,7 +79,6 @@ $B/abora-apply --config /etc/abora/abora.toml
 echo "-- result file:"; cat /var/lib/abora-apply/result.json; echo
 
 step "verify with dpkg"
-fail() { echo "FAIL: $*" >&2; exit 1; }
 [ "$(dpkg-query -W -f='${Version}' abora-testpkg)" = 2.0 ] || fail "abora-testpkg was not upgraded to 2.0"
 [ "$(cat /etc/abora-testpkg.conf)" = "mine=admin-edit" ] || fail "the administrator's config file was overwritten"
 [ "$(ls /var/lib/abora | grep -c apply-request || true)" = 0 ] || fail "the request file was left behind"

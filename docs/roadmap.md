@@ -31,7 +31,7 @@ sysinfo, API skeleton, read-only daemon, CLI, docs).
 
 ## Later ideas
 
-- Component health registry feeding `GET /api/v1/health`.
+- Component health registry feeding `GET /api/v1/health` — started: `AppState::components_health` reports `updates`; other subsystems still to register.
 - Audit log for mutating operations (they do not exist yet; design first).
 - Config layering/merge (`/etc` + drop-in files).
 - i18n for human-readable messages (API strings stay English machine-readable).
