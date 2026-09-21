@@ -131,7 +131,7 @@ pub fn should_auto_apply(
     perms.installs_permitted
         && has_available
         && !apply_pending
-        && since_last_attempt.is_none_or(|t| t >= interval)
+        && since_last_attempt.map_or(true, |t| t >= interval)
 }
 
 /// How soon to try again after a failed check, at most.
