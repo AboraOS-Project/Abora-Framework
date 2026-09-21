@@ -8,7 +8,7 @@
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
-use abora_api::{AvailableUpdate, Channel, UpdatesResponse};
+use abora_api::{AvailableUpdate, Channel, ScheduleInfo, UpdatesResponse};
 use abora_config::Config;
 use abora_log::Logger;
 #[cfg(test)]
@@ -63,6 +63,7 @@ pub struct UpdatesState {
     store: Arc<UpdateStore>,
     provider: Box<dyn UpdateProvider>,
     available: RwLock<Vec<AvailableUpdate>>,
+    schedule: RwLock<Option<ScheduleInfo>>,
 }
 
 /// A runner that always fails, for [`UpdatesState::disabled`].
@@ -79,7 +80,7 @@ impl CommandRunner for NoChecks {
 impl UpdatesState {
     /// The real thing: host packages (apt) with the given store.
     pub fn host(store: Arc<UpdateStore>) -> Self {
-        Self { provider: Box::new(HostPackageProvider::new(store.clone())), store, available: RwLock::new(Vec::new()) }
+        Self { provider: Box::new(HostPackageProvider::new(store.clone())), store, available: RwLock::new(Vec::new()), schedule: RwLock::new(None) }
     }
 
     /// Never runs a command and never touches the disk or `/var/run`. Used by tests.
@@ -92,7 +93,7 @@ impl UpdatesState {
             std::path::PathBuf::from("/nonexistent/abora-reboot-required"),
             abora_log::rfc3339_now,
         );
-        Self { store, provider: Box::new(provider), available: RwLock::new(Vec::new()) }
+        Self { store, provider: Box::new(provider), available: RwLock::new(Vec::new()), schedule: RwLock::new(None) }
     }
 
     /// Check for updates now (this runs `apt-get`, so call it off the async threads).
@@ -104,6 +105,11 @@ impl UpdatesState {
         Ok(count)
     }
 
+    /// Record what policy permits right now (called by the scheduler).
+    pub fn set_schedule(&self, info: ScheduleInfo) {
+        *self.schedule.write().expect("updates lock poisoned") = Some(info);
+    }
+
     /// Everything the endpoint reports, from what is already known (no commands are run
     /// except reading the reboot marker).
     pub fn response(&self) -> UpdatesResponse {
@@ -111,6 +117,7 @@ impl UpdatesState {
             status: self.provider.status().ok(),
             last_check: self.store.last_check(),
             reboot: self.provider.reboot_required().unwrap_or_else(|_| self.store.reboot()),
+            schedule: self.schedule.read().expect("updates lock poisoned").clone(),
             available: self.available.read().expect("updates lock poisoned").clone(),
             history: self.store.history(),
         }
@@ -138,7 +145,7 @@ mod tests {
             std::path::PathBuf::from("/nonexistent/abora-reboot-required"),
             || "2026-09-21T05:00:00Z".to_owned(),
         );
-        let updates = UpdatesState { store, provider: Box::new(provider), available: RwLock::new(Vec::new()) };
+        let updates = UpdatesState { store, provider: Box::new(provider), available: RwLock::new(Vec::new()), schedule: RwLock::new(None) };
 
         assert!(updates.response().status.is_none(), "nothing claimed before the first check");
         assert_eq!(updates.refresh(&Channel::Stable), Ok(1));

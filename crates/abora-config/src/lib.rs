@@ -40,6 +40,8 @@ use abora_core::DEFAULT_LISTEN_ADDR;
 use abora_log::{Format, Level};
 use abora_update::{Channel, MaintenanceWindow, RebootPolicy};
 
+pub mod schedule;
+
 pub use abora_log::{Format as LogFormat, Level as LogLevel};
 
 /// The full framework configuration. All values have sane, secure defaults.

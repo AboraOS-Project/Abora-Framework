@@ -19,8 +19,8 @@ sysinfo, API skeleton, read-only daemon, CLI, docs).
 
 - [x] Persistent update state + history store (`abora_update::UpdateStore`, used by `aborad` via `[updates] state_file`).
 - [x] A real `UpdateProvider` implementation: `HostPackageProvider` (apt, read-only check; `apply` still refused).
-- [ ] Poll scheduler honouring `[maintenance]` windows and `reboot_policy`.
-- [x] `GET /api/v1/updates` (status / available / reboot / history) replacing the `501`; one check at daemon startup until the scheduler exists.
+- [x] Poll scheduler (`scheduler.rs` + `abora_config::schedule`): checks every `check_interval`; reports what `[maintenance]` windows, `automatic` and `reboot_policy` permit. Nothing is installed yet.
+- [x] `GET /api/v1/updates` (status / available / reboot / history) replacing the `501`; checks run at startup and every `check_interval`.
 
 ## Milestone 3 — platform consumers
 

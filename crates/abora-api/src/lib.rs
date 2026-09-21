@@ -201,6 +201,19 @@ pub struct ServiceDetail {
     pub memory_bytes: Option<u64>,
 }
 
+/// What the update policy allows at the moment it was last evaluated (about every 30 seconds).
+/// Installing updates is not implemented yet, so these say what policy *would* permit.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ScheduleInfo {
+    /// `[updates] check_interval` in seconds.
+    pub check_interval_seconds: u64,
+    /// Whether the server's local time is inside a maintenance window. Omitted if the time is unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub in_maintenance_window: Option<bool>,
+    pub installs_permitted: bool,
+    pub reboot_permitted: bool,
+}
+
 /// Body of `GET /api/v1/updates`.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct UpdatesResponse {
@@ -211,6 +224,9 @@ pub struct UpdatesResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_check: Option<String>,
     pub reboot: RebootStatus,
+    /// Policy as last evaluated. Omitted until the scheduler has run once.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schedule: Option<ScheduleInfo>,
     /// Updates found by the last check.
     pub available: Vec<AvailableUpdate>,
     /// Applied updates, newest first.

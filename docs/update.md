@@ -88,25 +88,42 @@ implementable now while guaranteeing no accidental updates.
 
 ## Configuration flow
 
-`[updates]` (channel, automatic, check_interval, reboot_policy) and
+`[updates]` (channel, automatic, check_interval, reboot_policy, state_file) and
 `[maintenance]` (enabled, windows) live in the shared config (see
-[docs/configuration.md](configuration.md)). The scheduler will:
+[docs/configuration.md](configuration.md)).
 
-1. Poll `provider.check(channel)` at `check_interval`.
-2. Gate installations behind `automatic && maintenance enabled && inside window`.
-3. Respect `reboot_policy` for the reboot step.
-4. Append to history (newest first); expose via future API endpoints.
+## The scheduler
+
+`aborad` runs a background task (`services/aborad/src/scheduler.rs`) that wakes every
+30 seconds, re-reads the configuration (so a reload applies within seconds) and:
+
+1. **Checks** for updates: immediately at startup, then every `check_interval`. If a check
+   fails it is retried after at most 15 minutes instead of waiting out the whole interval.
+   Checks are read-only and are **not** limited to maintenance windows.
+2. **Evaluates the policy** (`abora_config::schedule`, pure and unit tested) for the server's
+   local time and publishes it as `schedule` in `GET /api/v1/updates`. Changes are logged.
+
+The policy:
+
+| Question | Answer |
+|----------|--------|
+| Installs permitted? | only if `[updates] automatic` **and** `[maintenance] enabled` **and** the local time is inside a window. No windows means never. |
+| Reboot permitted? | `reboot_policy = "always"`: yes. `"never"`: no. `"ask"` (default): only inside a window. |
+| Local time unknown? | nothing is permitted (except `always` for reboots, which does not use the clock). |
+
+Windows are half-open (`start <= now < end`), per weekday, and never cross midnight. The local
+time comes from `date` (it honours `TZ`), because the standard library cannot ask.
 
 ## Not implemented (honestly)
 
-* No poll scheduling, no provider, no install, no reboot.
-* `GET /api/v1/updates` returns `501 Not Implemented` with a reference to
-  this document.
+* **Installing updates and rebooting.** `apply` is refused, so the scheduler only *reports*
+  what policy would permit (`installs_permitted`, `reboot_permitted`); it never acts on it.
+* Only the apt provider exists.
 
 ## Roadmap order
 
-1. Store: persisted update state + history (SQLite or JSON file).
-2. Provider: implement `check`/`status`/`history` for a real source.
-3. Scheduler: poll + window gating in `aborad`.
-4. API: `GET /api/v1/updates/status`, `.../available`, `.../history`.
-5. Apply: `apply()` + reboot orchestration behind `RebootPolicy`.
+1. Store: persisted update state + history (JSON file). **Done.**
+2. Provider: read-only `check`/`status`/`history` for apt. **Done.**
+3. Scheduler: poll + policy evaluation in `aborad`. **Done.**
+4. API: `GET /api/v1/updates`. **Done.**
+5. Apply: `apply()` + reboot orchestration behind `RebootPolicy`. Next.

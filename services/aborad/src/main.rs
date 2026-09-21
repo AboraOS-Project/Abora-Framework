@@ -30,6 +30,7 @@ mod auth;
 mod errors;
 mod handlers;
 mod reload;
+mod scheduler;
 mod server;
 mod state;
 mod tokens;
@@ -298,19 +299,8 @@ fn run(config_path: Option<PathBuf>) -> Result<(), String> {
     info!(logger, "listening on {bind_addr} (loopback only)");
 
     let updates = open_updates(&config, &logger);
-    let channel = config.updates.channel.clone();
     let state = AppState::with_updates(config, logger, tokens, updates);
     let app = server::build(state.clone());
-
-    // First update check, off the async threads (it runs `apt-get`). Periodic checks come
-    // with the scheduler; until then this is what fills in GET /api/v1/updates.
-    {
-        let state = state.clone();
-        std::thread::spawn(move || match state.updates.refresh(&channel) {
-            Ok(n) => info!(state.logger, "update check finished: {n} update(s) available"),
-            Err(e) => warn!(state.logger, "update check failed: {e}"),
-        });
-    }
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -320,6 +310,8 @@ fn run(config_path: Option<PathBuf>) -> Result<(), String> {
     runtime.block_on(async {
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
         tokio::spawn(signal_and_watch_loop(state.clone(), reload_source, shutdown_tx));
+        // Checks for updates now and then every [updates] check_interval.
+        tokio::spawn(scheduler::run(state.clone()));
 
         let listener = tokio::net::TcpListener::from_std(listener)
             .map_err(|e| format!("could not register listener with async runtime: {e}"))?;

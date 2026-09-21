@@ -146,14 +146,16 @@ other field is omitted when systemd does not report it.
 ## `GET /api/v1/updates`
 
 Read-only update information. Nothing is installed, and this call runs no check: the daemon
-checks (with `apt-get -s`, a simulation) once at startup, and until the scheduler exists
-that is what this reports. See [docs/update.md](update.md).
+checks (with `apt-get -s`, a simulation) at startup and then every `[updates] check_interval`, and this reports
+the result. See [docs/update.md](update.md).
 
 ```json
 {
   "status": { "state": "update_available", "versions": ["openssl 3.0.13-0ubuntu3.5"] },
   "last_check": "2026-09-21T00:56:07.391Z",
   "reboot": { "required": false },
+  "schedule": { "check_interval_seconds": 21600, "in_maintenance_window": false,
+                "installs_permitted": false, "reboot_permitted": false },
   "available": [
     { "channel": "stable", "version": { "major": 3, "minor": 0, "patch": 13, "prerelease": null, "build": null },
       "component": "openssl",
@@ -167,6 +169,9 @@ that is what this reports. See [docs/update.md](update.md).
 * `status` and `last_check` are **omitted until the first check has finished**, and are never
   guessed. `status.state` is `up_to_date`, `update_available`, `installing` or `error`
   (`error` carries a `message`, for example when `apt-get` is missing).
+* `schedule` is what the update policy permits at the moment it was last evaluated (about every 30 s; omitted
+  until the first evaluation). Installing is not implemented, so `installs_permitted` / `reboot_permitted` say what policy
+  *would* allow. See [docs/update.md](update.md#the-scheduler).
 * `reboot.required` reflects `/var/run/reboot-required`; `pending_since` and `reason` are set when known.
 * `available` is what the last check found (`size_bytes: 0` means unknown; the exact Debian
   version is in `summary`). `history` is applied updates, newest first; it stays empty until
