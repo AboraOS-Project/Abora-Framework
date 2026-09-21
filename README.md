@@ -32,6 +32,15 @@ Early development for Abora v5 — **milestone 0: foundation**.
 | Docs & packaging   | docs/, SECURITY.md, systemd unit, dev/check scripts          |
 | Nix / NixOS        | flake: packages, devShell, hardened NixOS module, overlay    |
 
+## Try it as a live ISO
+
+```sh
+make run     # builds build/abora-framework.iso and boots it in QEMU
+```
+
+The Abora logo appears on screen with the boot logs underneath it, then `aborad` starts
+and answers inside the VM. See [docs/iso.md](docs/iso.md).
+
 ## Security posture
 
 Deny-by-default. Non-loopback binds are refused; `401`/`403` bearer-token
@@ -115,6 +124,7 @@ and runtime flow.
 * [docs/daemon-api.md](docs/daemon-api.md) — HTTP API contract
 * [docs/security.md](docs/security.md) — threat model and guarantees
 * [docs/update.md](docs/update.md) — update design (not yet delivered)
+* [docs/iso.md](docs/iso.md) — the live ISO and its boot screen
 * [docs/nix.md](docs/nix.md) — Nix / NixOS builds and the `services.aborad` module
 * [docs/roadmap.md](docs/roadmap.md) — what comes next
 * [SECURITY.md](SECURITY.md) — vulnerability reporting

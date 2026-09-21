@@ -1,0 +1,14 @@
+[package]
+name = "abora-boot"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Boot screen for the Abora Framework live ISO: logo plus live boot logs on the framebuffer"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]

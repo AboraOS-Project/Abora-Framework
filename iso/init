@@ -1,0 +1,101 @@
+#!/bin/busybox sh
+# PID 1 of the Abora Framework live ISO.
+#
+# Everything runs from the initramfs, in RAM: mount the pseudo filesystems,
+# start the boot screen, start the framework daemon, prove it answers, and stop
+# at a serial shell. Each step is reported to the boot screen through a FIFO.
+
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+export HOME=/root
+
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+mkdir -p /run /tmp /root
+mount -t tmpfs tmpfs /run
+mount -t tmpfs tmpfs /tmp
+
+# The kernel console is the serial port (see limine.conf), so nothing has touched
+# the virtual terminal yet: fbcon is still "deferring console take-over" and the
+# display driver has not done its first mode set, so pixels written to /dev/fb0
+# would never reach the screen. The first visible glyph written to tty1 (a space
+# does not count) makes fbcon take over; the escapes then clear it and hide the cursor.
+printf 'x\033[2J\033[H\033[?25l' > /dev/tty1 2>/dev/null
+
+mkfifo /run/boot.fifo
+VERSION="$(cat /etc/abora-version 2>/dev/null)"
+abora-boot --version-text "Live ISO  -  $VERSION" &
+BOOT_PID=$!
+
+# Report one line to the boot screen (which also echoes it to the serial console).
+say() {
+    if kill -0 "$BOOT_PID" 2>/dev/null; then echo "$*" > /run/boot.fifo; else echo "$*"; fi
+}
+step() { say "@status $*"; }
+ok()   { say "[ OK ] $*"; }
+warn() { say "[WARN] $*"; }
+fail() { say "[FAIL] $*"; }
+
+step "Preparing the system"
+sleep 1   # let the boot screen open the framebuffer and read the kernel log
+ok "mounted /proc, /sys, /dev and tmpfs on /run and /tmp"
+
+hostname abora
+ok "hostname set to abora"
+
+ip link set lo up 2>/dev/null && ok "loopback network is up (127.0.0.1)" || warn "could not bring up loopback"
+
+step "Checking configuration"
+if abora config check /etc/abora/abora.toml >/run/check.out 2>&1; then
+    ok "configuration /etc/abora/abora.toml is valid"
+else
+    fail "configuration check failed"
+    while read -r l; do say "       $l"; done < /run/check.out
+fi
+
+step "Starting aborad"
+say "[ .. ] starting aborad $VERSION"
+# aborad logs JSON lines; show them as "[ OK ] aborad: message" (or [WARN]).
+aborad_log() {
+    while read -r l; do
+        msg="${l#*\"message\":\"}"; msg="${msg%%\",\"timestamp*}"
+        lvl="${l#*\"level\":\"}"; lvl="${lvl%%\"*}"
+        case "$l" in
+            *'"message":"'*) ;;
+            *) msg="$l"; lvl=info ;;
+        esac
+        case "$lvl" in
+            warn)  say "[WARN] aborad: $msg" ;;
+            error) say "[FAIL] aborad: $msg" ;;
+            *)     say "       aborad: $msg" ;;
+        esac
+    done
+}
+( aborad --config /etc/abora/abora.toml 2>&1 | aborad_log ) &
+
+step "Waiting for the daemon API"
+tries=0
+until abora status --url http://127.0.0.1:7360 >/run/status.out 2>&1; do
+    tries=$((tries + 1))
+    if [ "$tries" -ge 25 ]; then break; fi
+    sleep 0.4
+done
+if [ "$tries" -lt 25 ]; then
+    ok "aborad answers on http://127.0.0.1:7360"
+    while read -r l; do say "       $l"; done < /run/status.out
+    step "aborad is running - Abora Framework is up"
+else
+    fail "aborad did not answer"
+    while read -r l; do say "       $l"; done < /run/status.out
+    step "aborad did not start"
+fi
+
+say "@done"
+say "Boot finished. Serial console: type 'abora status', 'poweroff' or 'reboot'."
+
+# Interactive shell on the serial console. If there is no console input (for
+# example a captured run) the shell exits at once, so pace the retries.
+while true; do
+    setsid cttyhack sh
+    sleep 2
+done
