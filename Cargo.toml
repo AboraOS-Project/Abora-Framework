@@ -13,6 +13,7 @@ members = [
     "boot/abora-boot",
 ]
 
+# ABORA-SYSTEM-FILE 1: set your fork's authors, description, license and version here
 [workspace.package]
 version = "0.1.0"
 edition = "2021"

@@ -5,6 +5,7 @@
 # start the boot screen, start the framework daemon, prove it answers, and stop
 # at a serial shell. Each step is reported to the boot screen through a FIFO.
 
+# ABORA-SYSTEM-FILE 3: this is the live system's boot sequence; add or change your fork's steps here
 export PATH=/bin:/sbin:/usr/bin:/usr/sbin
 export HOME=/root
 

@@ -32,6 +32,12 @@ Early development for Abora v5 — **milestone 0: foundation**.
 | Docs & packaging   | docs/, SECURITY.md, systemd unit, dev/check scripts          |
 | Nix / NixOS        | flake: packages, devShell, hardened NixOS module, overlay    |
 
+## Forking
+
+Files a fork must customize carry an `ABORA-SYSTEM-FILE <n>:` comment. Run `make fork-check`
+to list them in the order to edit them; delete the comment line once a file is done.
+See [docs/forking.md](docs/forking.md).
+
 ## Try it as a live ISO
 
 ```sh
@@ -124,6 +130,7 @@ and runtime flow.
 * [docs/daemon-api.md](docs/daemon-api.md) — HTTP API contract
 * [docs/security.md](docs/security.md) — threat model and guarantees
 * [docs/update.md](docs/update.md) — update design (not yet delivered)
+* [docs/forking.md](docs/forking.md) — starting an Abora fork
 * [docs/iso.md](docs/iso.md) — the live ISO and its boot screen
 * [docs/nix.md](docs/nix.md) — Nix / NixOS builds and the `services.aborad` module
 * [docs/roadmap.md](docs/roadmap.md) — what comes next
