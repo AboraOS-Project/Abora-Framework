@@ -26,7 +26,7 @@ sysinfo, API skeleton, read-only daemon, CLI, docs).
 
 - [ ] `abora-cloud` / `abora-atlas` crates extending config with `[cloud.*]` / `[atlas.*]`.
 - [ ] Authenticated remote management over a locked-down TLS listener (only after token auth; guards `[remote].enabled`).
-- [ ] Installer packaging: systemd unit, dedicated `aborad` user, hardening (`NoNewPrivileges`, `ProtectSystem`, …).
+- [x] Installer packaging: hardened systemd unit (exposure 1.1 OK), `installer/install.sh` (dedicated `aborad` user, never overwrites your config, `--uninstall`/`--purge`), `scripts/check-installer.sh`. Real root install not yet run on a clean machine; no .deb/.rpm yet.
 
 ## Later ideas
 
