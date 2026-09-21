@@ -32,7 +32,9 @@ if [ "${ABORA_UEFI:-0}" = 1 ]; then
 fi
 
 case "${1:-window}" in
-    window)     exec "${QEMU[@]}" -serial stdio ;;
+    # zoom-to-fit scales the 1280x800 guest screen to whatever size the window is, so nothing
+    # (such as the logo on the right) is cut off in a small window.
+    window)     exec "${QEMU[@]}" -display gtk,zoom-to-fit=on -serial stdio ;;
     --headless) exec "${QEMU[@]}" -display none -serial stdio ;;
     --capture)
         LOG="${2:?--capture needs a file}"
