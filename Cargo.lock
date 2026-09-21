@@ -81,6 +81,7 @@ name = "abora-update"
 version = "0.1.0"
 dependencies = [
  "abora-core",
+ "abora-log",
  "serde",
  "serde_json",
  "thiserror",
@@ -97,6 +98,7 @@ dependencies = [
  "abora-log",
  "abora-services",
  "abora-sysinfo",
+ "abora-update",
  "axum",
  "http-body-util",
  "serde",
