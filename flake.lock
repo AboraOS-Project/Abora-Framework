@@ -1,0 +1,66 @@
+{
+  "nodes": {
+    "abora-os": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1789619800,
+        "narHash": "sha256-uy7bD63zoAMZOpsEabMy1cHw8pePUzGjldNUspIDT98=",
+        "owner": "AnimatedGTVR",
+        "repo": "Abora-OS",
+        "rev": "7670a810abce8ea64b914dcb3d8add6a10b76dd4",
+        "type": "github"
+      },
+      "original": {
+        "owner": "AnimatedGTVR",
+        "ref": "stable",
+        "repo": "Abora-OS",
+        "type": "github"
+      }
+    },
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1789921291,
+        "narHash": "sha256-Ft/BRnIqw1MywFoXydKobjjWmDFgDdYtSpJliE8+yUw=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "44a91898084f46797b5fac650c7e8c9ac38c43d4",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "abora-os": "abora-os",
+        "nixpkgs": "nixpkgs",
+        "tinypm": "tinypm"
+      }
+    },
+    "tinypm": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1786576219,
+        "narHash": "sha256-qUikJXaHarElMnqH/N4qcqh0IWkroe6fnM65DEiiQow=",
+        "owner": "AnimatedGTVR",
+        "repo": "TinyPM",
+        "rev": "b211026d244f949723fc5c599c4d7275c053b9d5",
+        "type": "github"
+      },
+      "original": {
+        "owner": "AnimatedGTVR",
+        "repo": "TinyPM",
+        "type": "github"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}

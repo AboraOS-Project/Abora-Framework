@@ -24,6 +24,20 @@ sysinfo, API skeleton, read-only daemon, CLI, docs).
 - [x] **Applying updates**, manual first: root helper `abora-apply`, token-only `POST /api/v1/updates/apply` (with `dry_run`), reboot only when policy allows. Verified against real apt in throwaway Docker containers (`make test-apply`, and `make test-systemd` with systemd, the real installer and the path unit; both also in CI). Not yet tested: a reboot. See [apply-design.md](apply-design.md).
 - [x] Automatic apply, **opt-in** (`[updates] automatic = true`, off by default; inside a window, at most once per `check_interval`). Verified on real apt in Docker, both off and on. The default of `automatic` changed from `true` to `false` so that nothing installs unattended on an existing config.
 
+## Milestone 3.5 — a fork-ready NixOS base
+
+- [x] `nixosModules.framework` (the minimal Abora Framework base) plus optional `nixosModules.anix`
+  (imported from Abora OS, not copied) and `nixosModules.tinypm`.
+- [x] `abora-framework-install`: an interactive/scriptable NixOS installer that asks whether to
+  include ANIX and/or TinyPM, with `--generate-only` for a no-root dry run. Verified with
+  `make test-nix` (input validation, all 4 ANIX/TinyPM combinations evaluate as real NixOS systems,
+  both boot modes). **Not yet tested:** an actual `nixos-install` run in a VM.
+- [ ] A Nix-based `UpdateProvider` (nixos-rebuild / ANIX) as an alternative to the apt provider, for
+  Framework-based systems that are NixOS. Needs a decision: call `anix`, `abora update`, or
+  `nixos-rebuild` directly?
+- [ ] A dedicated installer ISO (`abora-framework-install` is a package today; Abora OS ships
+  `abora-live-*` ISOs the same tools could follow).
+
 ## Milestone 3 — platform consumers
 
 - [ ] `abora-cloud` / `abora-atlas` crates extending config with `[cloud.*]` / `[atlas.*]`.

@@ -53,6 +53,22 @@ jobs:
       - name: Install, start under systemd, apply a real upgrade, uninstall
         run: scripts/test-systemd-docker.sh
 
+  nix:
+    name: Nix flake, modules and installer
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Real Nix on the runner (not the Docker image used for local dev, which has no cache): ANIX and
+      # TinyPM build from source, and magic-nix-cache makes that incremental instead of ~30 minutes every run.
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+      - uses: DeterminateSystems/magic-nix-cache-action@v9
+      - run: sh scripts/docker/nix-test.sh
+
   iso:
     name: live ISO boots
     needs: check

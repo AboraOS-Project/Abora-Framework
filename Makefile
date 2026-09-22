@@ -11,7 +11,11 @@ test-apply:
 test-systemd:
 	@scripts/test-systemd-docker.sh
 
-.PHONY: test-systemd test-apply fork-check all iso run run-headless boot-test screenshot build test clean distclean help
+## test-nix      Test the Nix side: packages, installer input validation, all ANIX/TinyPM combos
+test-nix:
+	@scripts/test-nix-docker.sh
+
+.PHONY: test-nix test-systemd test-apply fork-check all iso run run-headless boot-test screenshot build test clean distclean help
 
 all: iso
 
