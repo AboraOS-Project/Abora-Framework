@@ -32,9 +32,12 @@ sysinfo, API skeleton, read-only daemon, CLI, docs).
   include ANIX and/or TinyPM, with `--generate-only` for a no-root dry run. Verified with
   `make test-nix` (input validation, all 4 ANIX/TinyPM combinations evaluate as real NixOS systems,
   both boot modes). **Not yet tested:** an actual `nixos-install` run in a VM.
-- [ ] A Nix-based `UpdateProvider` (nixos-rebuild / ANIX) as an alternative to the apt provider, for
-  Framework-based systems that are NixOS. Needs a decision: call `anix`, `abora update`, or
-  `nixos-rebuild` directly?
+- [x] A Nix-based `UpdateProvider` for Framework-based NixOS systems. Decision: call `nix` and
+  `nixos-rebuild` directly (a Framework server is not necessarily an Abora OS desktop with ANIX or
+  `abora update`). `check` refreshes the system flake's branch inputs read-only; `abora-apply`
+  runs `nix flake update <inputs>` + `nixos-rebuild switch` and restores `flake.lock` if the
+  rebuild fails. `[updates] provider = "auto"` picks it on NixOS. Checked against real Nix;
+  **not yet tested:** a real apply on a NixOS machine.
 - [ ] A dedicated installer ISO (`abora-framework-install` is a package today; Abora OS ships
   `abora-live-*` ISOs the same tools could follow).
 

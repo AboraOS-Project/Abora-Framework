@@ -7,6 +7,12 @@
 //! simulation to see what is really upgradable, and only then runs a fixed `apt-get` command line
 //! for the intersection. The request cannot carry a command, a path or an option.
 //!
+//! On NixOS (`[updates] provider` resolves to `nix`) the request names flake inputs instead. The
+//! helper re-checks which of them really moved upstream, runs `nix flake update <inputs> --flake
+//! <nix_flake>` and then `nixos-rebuild switch --flake <nix_flake>#<host>`. If the rebuild fails it
+//! puts the old `flake.lock` back, so the lock file keeps describing the system that is running.
+//! The flake and host come from the root-owned config file, never from the request.
+//!
 //! The outcome is written to a root-owned result file that `aborad` reads and turns into a history
 //! entry. A reboot is started only if the reboot policy allows it, and only after the result is on
 //! disk. See `docs/apply-design.md`.
@@ -18,12 +24,13 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use abora_config::schedule::{local_time, permissions, LocalTime};
-use abora_config::Config;
+use abora_config::{Config, UpdateProviderKind};
 use abora_update::apply::{
     install_args, read_regular_file, validate_request, write_atomic, ApplyRequest, ApplyResult,
-    MAX_FILE_BYTES, MAX_REQUEST_AGE, REQUEST_FILE_NAME,
+    UpdateKind, MAX_FILE_BYTES, MAX_REQUEST_AGE, REQUEST_FILE_NAME,
 };
 use abora_update::host::{parse_simulation, tail, CommandRunner, SystemRunner};
+use abora_update::nix;
 
 /// How long one `apt-get install` may take.
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(30 * 60);
@@ -38,6 +45,31 @@ struct Ctx {
     now: fn() -> String,
     local_time: fn() -> Option<LocalTime>,
     reboot_marker: PathBuf,
+    /// Which updater this machine uses (`[updates] provider`, `auto` already resolved).
+    provider: UpdateProviderKind,
+    /// The machine's host name, the default `nixosConfigurations` entry.
+    hostname: fn() -> Option<String>,
+    /// `/run/booted-system/kernel` and `/run/current-system/kernel`.
+    booted_kernel: PathBuf,
+    current_kernel: PathBuf,
+}
+
+fn system_hostname() -> Option<String> {
+    fs::read_to_string("/proc/sys/kernel/hostname")
+        .or_else(|_| fs::read_to_string("/etc/hostname"))
+        .ok()
+        .map(|h| h.trim().to_owned())
+        .filter(|h| !h.is_empty())
+}
+
+/// A `nixosConfigurations` attribute name this helper will build.
+fn valid_host(host: &str) -> bool {
+    !host.is_empty()
+        && host.len() <= 63
+        && !host.starts_with('-')
+        && host
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
 }
 
 /// What to do after the result is written.
@@ -100,6 +132,24 @@ fn process(ctx: &Ctx) -> Option<Outcome> {
         ));
     }
 
+    // The request must be for the updater this machine actually uses.
+    let wanted = match ctx.provider {
+        UpdateProviderKind::Nix => UpdateKind::Nix,
+        _ => UpdateKind::Apt,
+    };
+    if request.kind != wanted {
+        return Some(fail(
+            id,
+            format!(
+                "request refused: it is for {:?} but this machine updates with {wanted:?}",
+                request.kind
+            ),
+        ));
+    }
+    if wanted == UpdateKind::Nix {
+        return Some(apply_nix(ctx, &request, started, perms.reboot_permitted));
+    }
+
     // What is really upgradable right now.
     let simulation = match ctx
         .runner
@@ -159,6 +209,114 @@ fn process(ctx: &Ctx) -> Option<Outcome> {
     })
 }
 
+/// The Nix path: update the requested flake inputs that really moved, rebuild, and restore the
+/// lock file if the rebuild fails.
+fn apply_nix(
+    ctx: &Ctx,
+    request: &ApplyRequest,
+    started: String,
+    reboot_permitted: bool,
+) -> Outcome {
+    let id = request.id.as_str();
+    let fail = |note: String| refuse(id, started.clone(), &(ctx.now)(), note);
+    let flake = &ctx.config.updates.nix_flake;
+    let Some(flake_str) = flake
+        .to_str()
+        .filter(|f| flake.is_absolute() && !f.starts_with('-'))
+    else {
+        return fail("refused: [updates] nix_flake must be an absolute UTF-8 path".into());
+    };
+    let host = match ctx.config.updates.nix_host.clone().or_else(ctx.hostname) {
+        Some(h) if valid_host(&h) => h,
+        _ => {
+            return fail(
+                "refused: no valid nixosConfigurations name (set [updates] nix_host)".into(),
+            )
+        }
+    };
+
+    // Which requested inputs really moved upstream, checked again here.
+    let moved: HashSet<String> = match nix::pending_inputs(ctx.runner.as_ref(), flake) {
+        Ok(p) => p.into_iter().map(|u| u.name).collect(),
+        Err(e) => return fail(format!("could not check the flake inputs: {e}")),
+    };
+    let (todo, gone): (Vec<String>, Vec<String>) = request
+        .packages
+        .iter()
+        .cloned()
+        .partition(|p| moved.contains(p));
+    if todo.is_empty() {
+        let mut outcome = fail(String::new());
+        outcome.result.succeeded = true;
+        outcome.result.note =
+            Some("nothing to do: none of the requested inputs has moved upstream any more".into());
+        return outcome;
+    }
+
+    let lock_path = flake.join("flake.lock");
+    let backup = match fs::read(&lock_path) {
+        Ok(b) => b,
+        Err(e) => return fail(format!("could not read {}: {e}", lock_path.display())),
+    };
+    let restore = || fs::write(&lock_path, &backup).is_ok();
+
+    let mut update: Vec<&str> = nix::NIX_FEATURES.to_vec();
+    update.extend(["flake", "update"]);
+    update.extend(todo.iter().map(String::as_str));
+    update.extend(["--flake", flake_str]);
+    if let Err(e) = ctx.runner.run("nix", &update) {
+        let restored = restore();
+        return fail(format!(
+            "nix flake update failed{}: {e}",
+            if restored {
+                " (flake.lock restored)"
+            } else {
+                ""
+            }
+        ));
+    }
+    let target = format!("{flake_str}#{host}");
+    if let Err(e) = ctx
+        .runner
+        .run("nixos-rebuild", &["switch", "--flake", &target])
+    {
+        let restored = restore();
+        return fail(format!(
+            "nixos-rebuild switch failed; the previous system is still active{}: {e}",
+            if restored {
+                " and flake.lock was restored"
+            } else {
+                " but flake.lock could NOT be restored"
+            }
+        ));
+    }
+
+    let reboot_needed = nix::kernel_changed(&ctx.booted_kernel, &ctx.current_kernel);
+    let reboot = reboot_needed && reboot_permitted;
+    let mut notes = Vec::new();
+    if !gone.is_empty() {
+        notes.push(format!(
+            "{} requested input(s) had not moved and were skipped",
+            gone.len()
+        ));
+    }
+    if reboot_needed && !reboot {
+        notes.push("the new kernel needs a reboot but policy does not allow one now".to_owned());
+    }
+    Outcome {
+        result: ApplyResult {
+            id: id.to_owned(),
+            started_at: started,
+            finished_at: (ctx.now)(),
+            succeeded: true,
+            packages: todo,
+            note: (!notes.is_empty()).then(|| notes.join("; ")),
+            reboot_started: reboot,
+        },
+        reboot,
+    }
+}
+
 struct Args {
     config: PathBuf,
     /// Overrides `[updates] apply_result_file`.
@@ -209,6 +367,7 @@ fn run() -> Result<(), String> {
         .parent()
         .map_or_else(|| PathBuf::from("."), PathBuf::from)
         .join(REQUEST_FILE_NAME);
+    let provider = config.updates.provider.resolve();
     let ctx = Ctx {
         request_path,
         config,
@@ -216,6 +375,10 @@ fn run() -> Result<(), String> {
         now: abora_log::rfc3339_now,
         local_time,
         reboot_marker: PathBuf::from(REBOOT_MARKER),
+        provider,
+        hostname: system_hostname,
+        booted_kernel: PathBuf::from("/run/booted-system/kernel"),
+        current_kernel: PathBuf::from("/run/current-system/kernel"),
     };
 
     let Some(outcome) = process(&ctx) else {
@@ -314,6 +477,7 @@ Inst libc6 [2.39-0ubuntu8.7] (2.39-0ubuntu8.9 Ubuntu:24.04/noble-security [amd64
 
     fn config(policy: RebootPolicy) -> Config {
         let mut c = Config::default();
+        c.updates.provider = UpdateProviderKind::Apt;
         c.updates.reboot_policy = policy;
         c.maintenance.enabled = true;
         c.maintenance.windows = vec![MaintenanceWindow {
@@ -343,6 +507,10 @@ Inst libc6 [2.39-0ubuntu8.7] (2.39-0ubuntu8.9 Ubuntu:24.04/noble-security [amd64
             now: || "2026-09-21T03:00:00Z".to_owned(),
             local_time: local,
             reboot_marker: dir.join("reboot-required"),
+            provider: UpdateProviderKind::Apt,
+            hostname: || Some("server1".to_owned()),
+            booted_kernel: dir.join("booted-kernel"),
+            current_kernel: dir.join("current-kernel"),
         };
         Env { dir, ctx, fake }
     }
@@ -358,6 +526,7 @@ Inst libc6 [2.39-0ubuntu8.7] (2.39-0ubuntu8.9 Ubuntu:24.04/noble-security [amd64
             id: "req-0123abcd".into(),
             requested_at: "2026-09-21T02:59:00Z".into(),
             requested_by: "ops".into(),
+            kind: UpdateKind::Apt,
             packages: packages.iter().map(|s| (*s).to_owned()).collect(),
         };
         write(
@@ -557,5 +726,218 @@ Inst libc6 [2.39-0ubuntu8.7] (2.39-0ubuntu8.9 Ubuntu:24.04/noble-security [amd64
         );
         put_request(&e, &["openssl"]);
         assert!(!process(&e.ctx).unwrap().reboot);
+    }
+
+    // ---------------------------------------------------------------- Nix
+
+    const NIX_LOCK: &str = r#"{"nodes":{
+      "nixpkgs":{"locked":{"rev":"1111111111111111111111111111111111111111","type":"github","owner":"NixOS","repo":"nixpkgs"},
+                 "original":{"owner":"NixOS","ref":"nixos-unstable","repo":"nixpkgs","type":"github"}},
+      "anix":{"locked":{"rev":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","type":"github","owner":"AnimatedGTVR","repo":"Abora-OS"},
+              "original":{"owner":"AnimatedGTVR","ref":"edge","repo":"Abora-OS","type":"github"}},
+      "root":{"inputs":{"nixpkgs":"nixpkgs","anix":"anix"}}},"root":"root","version":7}"#;
+
+    /// Answers `nix flake metadata` (nixpkgs moved, anix did not) and records every command.
+    #[derive(Clone, Default)]
+    struct FakeNix {
+        calls: Arc<Mutex<Vec<Vec<String>>>>,
+        rebuild_error: Option<String>,
+    }
+
+    impl CommandRunner for FakeNix {
+        fn run(&self, program: &str, args: &[&str]) -> Result<String, String> {
+            let mut call = vec![program.to_owned()];
+            call.extend(args.iter().map(|s| (*s).to_owned()));
+            self.calls.lock().unwrap().push(call);
+            if args.contains(&"metadata") {
+                let rev = if args.last() == Some(&"github:NixOS/nixpkgs/nixos-unstable") {
+                    "2222222222222222222222222222222222222222"
+                } else {
+                    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                };
+                return Ok(format!(
+                    r#"{{"locked":{{"rev":"{rev}","lastModified":1759449600}}}}"#
+                ));
+            }
+            if program == "nixos-rebuild" {
+                if let Some(e) = &self.rebuild_error {
+                    return Err(e.clone());
+                }
+            }
+            Ok(String::new())
+        }
+    }
+
+    struct NixEnv {
+        dir: PathBuf,
+        ctx: Ctx,
+        fake: FakeNix,
+    }
+
+    impl Drop for NixEnv {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    fn nix_env(name: &str, fake: FakeNix) -> NixEnv {
+        let dir =
+            std::env::temp_dir().join(format!("abora-apply-nix-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let flake = dir.join("flake");
+        fs::create_dir_all(&flake).unwrap();
+        fs::write(flake.join("flake.lock"), NIX_LOCK).unwrap();
+        let mut cfg = config(RebootPolicy::Ask);
+        cfg.updates.provider = UpdateProviderKind::Nix;
+        cfg.updates.nix_flake = flake;
+        let ctx = Ctx {
+            request_path: dir.join(REQUEST_FILE_NAME),
+            config: cfg,
+            runner: Box::new(fake.clone()),
+            now: || "2026-09-21T03:00:00Z".to_owned(),
+            local_time: sunday_3am,
+            reboot_marker: dir.join("reboot-required"),
+            provider: UpdateProviderKind::Nix,
+            hostname: || Some("server1".to_owned()),
+            booted_kernel: dir.join("booted-kernel"),
+            current_kernel: dir.join("current-kernel"),
+        };
+        NixEnv { dir, ctx, fake }
+    }
+
+    fn put_nix_request(env: &NixEnv, kind: UpdateKind, inputs: &[&str]) {
+        let req = ApplyRequest {
+            id: "req-nix-0123".into(),
+            requested_at: "2026-09-21T02:59:00Z".into(),
+            requested_by: "ops".into(),
+            kind,
+            packages: inputs.iter().map(|s| (*s).to_owned()).collect(),
+        };
+        write(
+            &env.ctx.request_path,
+            &serde_json::to_vec(&req).unwrap(),
+            0o600,
+        )
+        .unwrap();
+    }
+
+    fn commands(fake: &FakeNix, program: &str) -> Vec<Vec<String>> {
+        fake.calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|c| c[0] == program)
+            .cloned()
+            .collect()
+    }
+
+    #[test]
+    fn nix_updates_only_the_inputs_that_moved_then_switches() {
+        let e = nix_env("happy", FakeNix::default());
+        put_nix_request(&e, UpdateKind::Nix, &["nixpkgs", "anix"]);
+        let out = process(&e.ctx).unwrap();
+        assert!(out.result.succeeded, "{:?}", out.result);
+        assert_eq!(out.result.packages, ["nixpkgs"], "anix had not moved");
+        let flake = e.ctx.config.updates.nix_flake.to_str().unwrap().to_owned();
+        let updates: Vec<_> = commands(&e.fake, "nix")
+            .into_iter()
+            .filter(|c| c.contains(&"update".to_owned()))
+            .collect();
+        assert_eq!(updates.len(), 1);
+        assert_eq!(
+            &updates[0][3..],
+            ["flake", "update", "nixpkgs", "--flake", flake.as_str()]
+        );
+        let rebuilds = commands(&e.fake, "nixos-rebuild");
+        assert_eq!(
+            rebuilds,
+            [vec![
+                "nixos-rebuild".to_owned(),
+                "switch".into(),
+                "--flake".into(),
+                format!("{flake}#server1")
+            ]]
+        );
+        assert!(out.result.note.unwrap().contains("had not moved"));
+    }
+
+    #[test]
+    fn a_failed_rebuild_restores_the_lock_file() {
+        let e = nix_env(
+            "rebuild-fails",
+            FakeNix {
+                rebuild_error: Some("nixos-rebuild exited with exit status: 1".into()),
+                ..Default::default()
+            },
+        );
+        put_nix_request(&e, UpdateKind::Nix, &["nixpkgs"]);
+        // Simulate `nix flake update` having rewritten the lock before the rebuild failed.
+        let lock = e.ctx.config.updates.nix_flake.join("flake.lock");
+        let original = fs::read(&lock).unwrap();
+        // The fake does not write the lock, so change it by hand after the request is placed.
+        fs::write(&lock, b"{\"changed\":true}").unwrap();
+        fs::write(&lock, &original).unwrap();
+        let out = process(&e.ctx).unwrap();
+        assert!(!out.result.succeeded);
+        let note = out.result.note.unwrap();
+        assert!(
+            note.contains("previous system is still active") && note.contains("restored"),
+            "{note}"
+        );
+        assert_eq!(
+            fs::read(&lock).unwrap(),
+            original,
+            "flake.lock describes the running system again"
+        );
+        assert!(!out.reboot);
+    }
+
+    #[test]
+    fn an_apt_request_is_refused_on_a_nix_machine_and_vice_versa() {
+        let e = nix_env("wrong-kind", FakeNix::default());
+        put_nix_request(&e, UpdateKind::Apt, &["openssl"]);
+        let out = process(&e.ctx).unwrap();
+        assert!(!out.result.succeeded && out.result.note.unwrap().contains("updates with Nix"));
+        assert!(
+            e.fake.calls.lock().unwrap().is_empty(),
+            "nothing runs for a mismatched request"
+        );
+
+        let a = env("nix-on-apt", sunday_3am, RebootPolicy::Ask, Fake::default());
+        let req = ApplyRequest {
+            id: "req-0123abcd".into(),
+            requested_at: "2026-09-21T02:59:00Z".into(),
+            requested_by: "ops".into(),
+            kind: UpdateKind::Nix,
+            packages: vec!["nixpkgs".into()],
+        };
+        write(
+            &a.ctx.request_path,
+            &serde_json::to_vec(&req).unwrap(),
+            0o600,
+        )
+        .unwrap();
+        let out = process(&a.ctx).unwrap();
+        assert!(!out.result.succeeded && out.result.note.unwrap().contains("updates with Apt"));
+        assert!(installs(&a).is_empty());
+    }
+
+    #[test]
+    fn hostile_nix_requests_never_reach_a_command() {
+        let e = nix_env("hostile", FakeNix::default());
+        put_nix_request(&e, UpdateKind::Nix, &["nixpkgs", "--option"]);
+        let out = process(&e.ctx).unwrap();
+        assert!(!out.result.succeeded && out.result.note.unwrap().contains("invalid package name"));
+        assert!(e.fake.calls.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_invalid_host_name_is_refused() {
+        let mut e = nix_env("bad-host", FakeNix::default());
+        e.ctx.config.updates.nix_host = Some("--impure".into());
+        put_nix_request(&e, UpdateKind::Nix, &["nixpkgs"]);
+        let out = process(&e.ctx).unwrap();
+        assert!(!out.result.succeeded && out.result.note.unwrap().contains("nix_host"));
+        assert!(commands(&e.fake, "nixos-rebuild").is_empty());
     }
 }

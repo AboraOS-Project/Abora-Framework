@@ -38,6 +38,13 @@ state_file = "/var/lib/abora/updates.json"
 apply_result_file = "/var/lib/abora-apply/result.json"
 # ---------------------------------------------------------------------------
 
+# Which updater: "auto" (Nix on NixOS, apt elsewhere), "apt" or "nix".
+# provider = "auto"
+# For the Nix provider: the system flake, and which nixosConfigurations
+# entry to switch to (default: the host name).
+# nix_flake = "/etc/nixos"
+# nix_host = "server1"
+
 # ---------------------------------------------------------------------------
 # [maintenance] — scheduled windows for automatic update/reboot work
 # ---------------------------------------------------------------------------
