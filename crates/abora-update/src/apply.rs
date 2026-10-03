@@ -12,6 +12,18 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use crate::host::valid_package_name;
+use crate::nix::valid_input_name;
+
+/// Which updater a request is for. Requests written before the Nix provider existed carry no
+/// `kind` and mean `apt`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum UpdateKind {
+    #[default]
+    Apt,
+    /// `packages` are flake input names.
+    Nix,
+}
 
 /// Most packages one request may name.
 pub const MAX_PACKAGES: usize = 2000;
@@ -32,7 +44,10 @@ pub struct ApplyRequest {
     pub requested_at: String,
     /// Token name of the caller, for the audit trail.
     pub requested_by: String,
-    /// Packages the last check listed. Never anything else.
+    /// apt packages, or flake input names for `kind = "nix"`.
+    #[serde(default)]
+    pub kind: UpdateKind,
+    /// Packages (or flake inputs) the last check listed. Never anything else.
     pub packages: Vec<String>,
 }
 
@@ -69,7 +84,11 @@ pub fn validate_request(request: &ApplyRequest) -> Result<(), String> {
     if request.packages.len() > MAX_PACKAGES {
         return Err(format!("request names more than {MAX_PACKAGES} packages"));
     }
-    if let Some(bad) = request.packages.iter().find(|p| !valid_package_name(p)) {
+    let valid = match request.kind {
+        UpdateKind::Apt => valid_package_name,
+        UpdateKind::Nix => valid_input_name,
+    };
+    if let Some(bad) = request.packages.iter().find(|p| !valid(p)) {
         // Deliberately not echoing the value: it came from a file the helper does not trust.
         return Err(format!(
             "request contains an invalid package name ({} bytes)",
@@ -170,8 +189,27 @@ mod tests {
             id: "req-0123abcd".into(),
             requested_at: "2026-09-21T02:00:00Z".into(),
             requested_by: "ops".into(),
+            kind: UpdateKind::Apt,
             packages: packages.iter().map(|s| (*s).to_owned()).collect(),
         }
+    }
+
+    #[test]
+    fn nix_requests_validate_input_names_and_old_requests_mean_apt() {
+        let mut r = request(&["nixpkgs", "home-manager"]);
+        r.kind = UpdateKind::Nix;
+        assert!(validate_request(&r).is_ok());
+        r.packages = vec!["--option".into()];
+        assert!(validate_request(&r).is_err());
+        let old: ApplyRequest = serde_json::from_str(
+            r#"{"id":"req-0123abcd","requested_at":"x","requested_by":"ops","packages":["openssl"]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            old.kind,
+            UpdateKind::Apt,
+            "requests from before the Nix provider are apt"
+        );
     }
 
     fn scratch(name: &str) -> PathBuf {

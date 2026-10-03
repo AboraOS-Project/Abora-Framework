@@ -16,10 +16,12 @@ use abora_api::{
 use abora_config::schedule::{local_time, permissions, LocalTime};
 use abora_config::Config;
 use abora_log::Logger;
+use abora_update::apply::UpdateKind;
 use abora_update::apply::{read_regular_file, write_atomic, ApplyRequest, ApplyResult};
 #[cfg(test)]
 use abora_update::host::CommandRunner;
 use abora_update::host::HostPackageProvider;
+use abora_update::nix::NixProvider;
 use abora_update::{UpdateProvider, UpdateStore};
 
 use crate::tokens::TokenStore;
@@ -95,6 +97,8 @@ pub struct UpdatesState {
     /// Written by the helper, read by `aborad`.
     apply_result_file: PathBuf,
     local_time: fn() -> Option<LocalTime>,
+    /// Which updater the provider is, so apply requests say what they ask for.
+    kind: UpdateKind,
 }
 
 /// A runner that always fails, for [`UpdatesState::disabled`].
@@ -124,7 +128,26 @@ impl UpdatesState {
             apply_request_file,
             apply_result_file,
             local_time,
+            kind: UpdateKind::Apt,
         }
+    }
+
+    /// The Nix provider for the flake in `flake_dir`.
+    pub fn nix(
+        store: Arc<UpdateStore>,
+        flake_dir: PathBuf,
+        request_file: PathBuf,
+        result_file: PathBuf,
+    ) -> Self {
+        let mut state = Self::new(
+            store.clone(),
+            Box::new(NixProvider::new(store, flake_dir)),
+            request_file,
+            result_file,
+            local_time,
+        );
+        state.kind = UpdateKind::Nix;
+        state
     }
 
     /// The real thing: host packages (apt) with the given store. `request_file` is where apply
@@ -294,6 +317,7 @@ impl UpdatesState {
             id: id.clone(),
             requested_at: abora_log::rfc3339_now(),
             requested_by: caller.to_owned(),
+            kind: self.kind,
             packages: packages.clone(),
         };
         let json = serde_json::to_vec_pretty(&request).expect("request serializes");

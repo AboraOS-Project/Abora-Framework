@@ -209,6 +209,23 @@ impl Config {
 
         validate_windows(&self.maintenance.windows, &mut errors);
 
+        if !self.updates.nix_flake.is_absolute() {
+            errors.push("[updates] nix_flake must be an absolute path".to_owned());
+        }
+        if let Some(host) = &self.updates.nix_host {
+            let ok = !host.is_empty()
+                && host.len() <= 63
+                && !host.starts_with('-')
+                && host
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.');
+            if !ok {
+                errors.push(format!(
+                    "[updates] nix_host `{host}` is not a valid nixosConfigurations name"
+                ));
+            }
+        }
+
         if self.remote.listen_addr.parse::<SocketAddr>().is_err() {
             errors.push(format!(
                 "[remote] listen_addr `{}` is not a valid socket address",
@@ -329,6 +346,37 @@ pub struct UpdatesConfig {
     /// Where the root update helper writes the outcome of an apply (absolute path). `aborad` and
     /// `abora-apply` both read this setting, so they always agree.
     pub apply_result_file: PathBuf,
+    /// Which updater to use: `auto` (Nix on NixOS, apt elsewhere), `apt` or `nix`.
+    pub provider: UpdateProviderKind,
+    /// The system flake the Nix provider checks and `abora-apply` rebuilds.
+    pub nix_flake: PathBuf,
+    /// The flake's `nixosConfigurations` attribute to switch to. Default: the machine's host name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nix_host: Option<String>,
+}
+
+/// `[updates] provider`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum UpdateProviderKind {
+    /// Nix when `/etc/NIXOS` exists, apt otherwise.
+    #[default]
+    Auto,
+    Apt,
+    Nix,
+}
+
+impl UpdateProviderKind {
+    /// The concrete provider for this machine (`auto` resolved).
+    pub fn resolve(self) -> UpdateProviderKind {
+        match self {
+            UpdateProviderKind::Auto if std::path::Path::new("/etc/NIXOS").exists() => {
+                UpdateProviderKind::Nix
+            }
+            UpdateProviderKind::Auto => UpdateProviderKind::Apt,
+            other => other,
+        }
+    }
 }
 
 impl Default for UpdatesConfig {
@@ -340,6 +388,9 @@ impl Default for UpdatesConfig {
             reboot_policy: RebootPolicy::default(),
             state_file: PathBuf::from("/var/lib/abora/updates.json"),
             apply_result_file: PathBuf::from(abora_update::apply::DEFAULT_RESULT_FILE),
+            provider: UpdateProviderKind::Auto,
+            nix_flake: PathBuf::from(abora_update::nix::DEFAULT_FLAKE_DIR),
+            nix_host: None,
         }
     }
 }

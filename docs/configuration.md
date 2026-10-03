@@ -58,6 +58,9 @@ Loading always parses *and* validates. Invalid config is rejected loudly:
 | `check_interval`| string          | `6h`     | Poll interval: `<n>s`, `<n>m`, `<n>h`, or `<n>d` |
 | `reboot_policy` | string          | `ask`    | Reboot outside a window: `ask`, `always`, `never` |
 | `apply_result_file` | absolute path | `/var/lib/abora-apply/result.json` | Where `abora-apply` writes the outcome of an apply; read by both it and `aborad` |
+| `provider`      | string          | `auto`   | `auto` (Nix on NixOS, apt elsewhere), `apt` or `nix` |
+| `nix_flake`     | absolute path   | `/etc/nixos` | The system flake the Nix provider checks and `abora-apply` rebuilds |
+| `nix_host`      | string          | host name | Which `nixosConfigurations` entry `nixos-rebuild switch` builds |
 | `state_file`    | absolute path   | `/var/lib/abora/updates.json` | Update history and state; read at startup (restart to change). If it cannot be opened the daemon logs a warning and keeps state in memory only |
 
 `check_interval` drives the scheduler (checks are read-only). `automatic = true` lets the scheduler request an

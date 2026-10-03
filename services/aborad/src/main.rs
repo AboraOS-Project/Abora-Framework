@@ -227,12 +227,20 @@ fn open_updates(config: &Config, logger: &Logger) -> UpdatesState {
         .parent()
         .map_or_else(|| PathBuf::from("."), PathBuf::from)
         .join(abora_update::apply::REQUEST_FILE_NAME);
-    let host = |store: UpdateStore| {
-        UpdatesState::host(
+    let provider = config.updates.provider.resolve();
+    info!(logger, "update provider: {provider:?}");
+    let host = |store: UpdateStore| match provider {
+        abora_config::UpdateProviderKind::Nix => UpdatesState::nix(
+            Arc::new(store),
+            config.updates.nix_flake.clone(),
+            request_file.clone(),
+            config.updates.apply_result_file.clone(),
+        ),
+        _ => UpdatesState::host(
             Arc::new(store),
             request_file.clone(),
             config.updates.apply_result_file.clone(),
-        )
+        ),
     };
     match UpdateStore::open(path) {
         Ok((store, Opened::Loaded)) => {

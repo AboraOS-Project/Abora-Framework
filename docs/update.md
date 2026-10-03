@@ -70,6 +70,24 @@ channels: the `channel` argument is echoed back. Programs are run without a shel
 arguments, `LC_ALL=C` and a 120 s timeout; package names are validated. Checked against this
 development machine, it found the same 209 upgrades as `apt-get -s` itself.
 
+## NixOS flakes (`NixProvider`)
+
+On NixOS the system is a flake (by default `/etc/nixos`) and its `flake.lock` pins every input.
+An update is an input whose upstream branch has moved on. `[updates] provider = "auto"` (the
+default) picks this provider when `/etc/NIXOS` exists; `"nix"` or `"apt"` force one.
+
+| Method | Source |
+|--------|--------|
+| `check` | Reads `<nix_flake>/flake.lock`. For each root input that follows a branch (`github`, `gitlab`, `git` over https/http/ssh/git, `tarball` over https/http) it runs `nix flake metadata --json --refresh <ref>` and compares the revision. Moved inputs become `AvailableUpdate`s (component = input, version = upstream commit date, summary = `nixpkgs: 9fbb54b -> c59305b (github:NixOS/nixpkgs/nixos-unstable)`). No root, nothing written. |
+| `reboot_required` | `/run/booted-system/kernel` differs from `/run/current-system/kernel`. |
+| `apply` | Through `abora-apply` (below): `nix flake update <inputs> --flake <nix_flake>`, then `nixos-rebuild switch --flake <nix_flake>#<nix_host>`. |
+
+Inputs pinned to a revision, `path` and indirect (registry) inputs, and `follows` are never
+touched. Owner, repo, branch names and URLs are validated before use (no leading `-`, no `..`,
+known URL schemes only), and every command runs without a shell. If any input cannot be
+refreshed (offline, removed upstream) the whole check fails rather than report "up to date".
+Checked against real Nix on the Abora OS flake: it reported nixpkgs moving on `nixos-unstable`.
+
 ## The `UpdateProvider` trait
 
 ```rust
@@ -150,7 +168,7 @@ non-zero if the daemon refuses (nothing to apply, outside a maintenance window, 
 
 * Automatic apply is opt-in and deliberately simple: no per-package rules, no security-only mode, no
   "only on the first Sunday" logic beyond the window.
-* Only the apt provider exists.
+* Providers: apt and NixOS flakes. Applying the Nix path is unit-tested with a fake runner; it has not yet run on a real NixOS machine.
 
 ## Roadmap order
 

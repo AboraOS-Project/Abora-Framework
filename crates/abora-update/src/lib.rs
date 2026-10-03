@@ -23,6 +23,7 @@ use abora_core::Version;
 
 pub mod apply;
 pub mod host;
+pub mod nix;
 pub mod store;
 pub use host::HostPackageProvider;
 pub use store::{Opened, StoreError, UpdateStore};
