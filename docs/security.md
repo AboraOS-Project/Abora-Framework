@@ -25,13 +25,13 @@ version for operators lives in the root [`SECURITY.md`](../SECURITY.md).
 
 | Property               | Guarantee                                             |
 |------------------------|-------------------------------------------------------|
-| Bind address           | Loopback only (`127.0.0.1` / `::1`). Non-loopback binds are **refused at startup**. |
-| Admission              | With `[security] token_file` configured: every request needs a valid bearer token (`401` otherwise), and remote peers are still **refused unconditionally**. Without a token file: loopback is trusted (preview), remote is refused. |
+| Bind address           | The local listener is loopback only (`127.0.0.1` / `::1`); non-loopback binds are **refused at startup**. Remote management uses a separate TLS-only listener (below). |
+| Admission              | Local listener: with `[security] token_file` configured, every request needs a valid bearer token (`401` otherwise); without one, loopback is trusted (preview). Non-loopback peers on the local listener are always refused. |
 | Authentication         | `Authorization: Bearer <secret>`, SHA-256 hash-compared in constant time. |
 | Authorization          | Per-token permission grants; `read_all` or matching `read:*` ids. Missing grant → `403`. |
 | Operations             | Read-only: `health`, `version`, `system`, `services`. |
 | Updates                | `501` — not faked.                                    |
-| Remote management      | Not implemented; `[remote].enabled` is logged as ignored. |
+| Remote management      | Opt-in (`[remote] enabled`). TLS only, on its own `tls_listen_addr`. Every request needs a valid token; no preview mode, and `require_authentication = false` does not apply. Refuses to start without a certificate, a key and a token file. |
 | Logging                | Structured to stderr (journald); sensitive values are `Redacted`. |
 | Arbitrary execution    | No such endpoint exists or is planned.                |
 
@@ -78,14 +78,33 @@ once token provisioning is mandatory in packaging.
 
 ### Non-loopback peers
 
-Regardless of tokens, non-loopback connections are refused with `403`:
-authenticated remote management does not exist yet and tokens are not a
-backdoor around the bind boundary.
+On the local listener, non-loopback connections are refused with `403`
+regardless of tokens: tokens are not a backdoor around the bind boundary.
+
+### Remote management over TLS
+
+`[remote] enabled = true` starts a second listener on `tls_listen_addr`
+(default `0.0.0.0:7361`) that speaks only TLS (rustls). Every request on it
+must carry a valid bearer token with the route's permission:
+
+* No token store configured: every remote request is refused (`403`).
+  Configuration validation also refuses to start remote management without
+  `[security] token_file`.
+* Missing or unknown token: `401`. Valid token without the permission: `403`.
+* `require_authentication = false` relaxes the local listener only, never this one.
+* Plain HTTP on the TLS port gets no API response.
+
+Create a certificate with `abora tls generate --hostname <name>` (a
+self-signed server certificate and a `0600` key under `/etc/abora/tls`), or
+use one from your own CA. Clients trust a self-signed certificate by setting
+`ABORA_CA_FILE` to it. Give remote tokens only the permissions they need;
+`manage:updates` lets the holder apply updates. `make test-remote` exercises
+all of this with the real binaries.
 
 ## What we never do
 
 * Execute shell commands or arbitrary code from API input.
-* Bind non-loopback addresses while unauthenticated-by-token.
+* Bind non-loopback addresses while unauthenticated-by-token, or without TLS.
 * Leak secrets, tokens, or config values (see `Redacted` in `abora-log`).
 * Store token secrets on disk in plaintext.
 * Log request bodies or full error chains that could contain secrets.
@@ -93,7 +112,8 @@ backdoor around the bind boundary.
 ## Startup checks
 
 1. Config parses and validates.
-2. Bind address is loopback (else: refuse).
+2. Local bind address is loopback (else: refuse). With `[remote] enabled`:
+   certificate, key and token file are configured and load (else: refuse).
 3. Token file, when configured, loads and is valid (else: refuse).
 4. Listener binds **before** the runtime accepts requests.
 5. Shutdown on SIGINT/SIGTERM drains gracefully.

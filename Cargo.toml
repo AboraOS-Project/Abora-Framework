@@ -36,6 +36,11 @@ ureq = "3.0"
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 sha2 = "0.10"
+# TLS for the remote-management listener. `ring` as the crypto provider keeps
+# the build free of cmake/nasm (aws-lc-rs needs both).
+axum-server = { version = "0.7", features = ["tls-rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "logging", "tls12"] }
+rcgen = "0.13"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

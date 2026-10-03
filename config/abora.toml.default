@@ -51,14 +51,18 @@ enabled = true
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# [remote] — remote management (NOT implemented in this milestone)
+# [remote] — remote management over TLS
 # ---------------------------------------------------------------------------
 [remote]
-# Reserved. The daemon ignores this and refuses to bind a non-loopback
-# address until real (authenticated) remote management exists.
+# Also serve the API over TLS on tls_listen_addr. Needs tls_cert_file,
+# tls_key_file and [security] token_file; every remote request needs a token.
 enabled = false
-# Socket the daemon binds. Loopback only, for now.
+# The local listener. Always loopback.
 listen_addr = "127.0.0.1:7360"
+# The TLS remote listener, used when enabled.
+tls_listen_addr = "0.0.0.0:7361"
+# tls_cert_file = "/etc/abora/tls/cert.pem"
+# tls_key_file = "/etc/abora/tls/key.pem"
 # Optional FQDN advertised by the API for discovery.
 # advertise_hostname = "server1.internal"
 # ---------------------------------------------------------------------------

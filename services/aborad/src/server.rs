@@ -34,6 +34,17 @@ pub const X_REQUEST_ID: HeaderName = HeaderName::from_static("x-request-id");
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestId(pub String);
 
+/// Marks a request that arrived on the TLS remote-management listener. The
+/// authorization layer then requires a token for every operation.
+#[derive(Debug, Clone, Copy)]
+pub struct RemoteListener;
+
+/// The router for the TLS remote-management listener: the same routes, with
+/// every request tagged [`RemoteListener`].
+pub fn build_remote(state: SharedState) -> Router {
+    build(state).layer(axum::Extension(RemoteListener))
+}
+
 /// Build the full router for a daemon instance. Pass the loopback boundary
 /// explicitly so that serving and testing use the same path.
 pub fn build(state: SharedState) -> Router {
@@ -297,7 +308,14 @@ async fn authorize(
         } else {
             None
         };
-        let decision = auth::authorize(peer, permission, bearer, store);
+        let remote = req.extensions().get::<RemoteListener>().is_some();
+        // The remote listener always checks tokens, whatever require_authentication says.
+        let store = if remote { tokens.as_ref() } else { store };
+        let decision = if remote {
+            auth::authorize_remote(permission, bearer, store)
+        } else {
+            auth::authorize(peer, permission, bearer, store)
+        };
         // Who is asking, for the audit trail (only meaningful when a token authenticated).
         let name = store
             .zip(bearer)

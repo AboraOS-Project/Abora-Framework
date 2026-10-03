@@ -23,6 +23,7 @@ Early development for Abora v5 — **milestone 0: foundation**.
 | Workspace          | 7 library crates + 2 binaries                                |
 | `aborad` daemon    | Loopback-only, read-only API: health, version, system, services |
 | Authentication     | Per-permission bearer tokens (SHA-256 hashed, constant-time)  |
+| Remote management  | Opt-in TLS listener, tokens always required (`abora tls generate`) |
 | Service registry   | systemd discovery via `abora-services` (read-only, `503` honest) |
 | `abora` CLI        | `version`, `status`, `config check`, `auth generate-token`   |
 | Configuration      | Strongly-typed TOML, validated, Cloud/Atlas-extensible        |

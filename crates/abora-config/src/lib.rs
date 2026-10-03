@@ -159,10 +159,12 @@ impl Config {
             format!("maintenance enabled: {}", self.maintenance.enabled),
             format!("remote management enabled: {}", self.remote.enabled),
             format!("auth required: {}", self.security.require_authentication),
-            format!(
-                "listen: {} (loopback-only for now)",
-                self.remote.listen_addr
-            ),
+            format!("listen: {} (loopback)", self.remote.listen_addr),
+            if self.remote.enabled {
+                format!("remote TLS listen: {}", self.remote.tls_listen_addr)
+            } else {
+                "remote TLS listen: off".to_owned()
+            },
             format!(
                 "log level: {}, format: {}",
                 self.logging.level, self.logging.format
@@ -212,6 +214,28 @@ impl Config {
                 "[remote] listen_addr `{}` is not a valid socket address",
                 self.remote.listen_addr
             ));
+        }
+        if self.remote.tls_listen_addr.parse::<SocketAddr>().is_err() {
+            errors.push(format!(
+                "[remote] tls_listen_addr `{}` is not a valid socket address",
+                self.remote.tls_listen_addr
+            ));
+        }
+        if self.remote.enabled {
+            // Remote management fails closed: no TLS material or no tokens, no listener.
+            if self.remote.tls_cert_file.is_none() || self.remote.tls_key_file.is_none() {
+                errors
+                    .push("[remote] enabled needs tls_cert_file and tls_key_file (PEM)".to_owned());
+            }
+            if self.security.token_file.is_none() {
+                errors.push(
+                    "[remote] enabled needs [security] token_file: every remote request must carry a token"
+                        .to_owned(),
+                );
+            }
+            if self.remote.listen_addr == self.remote.tls_listen_addr {
+                errors.push("[remote] tls_listen_addr must differ from listen_addr".to_owned());
+            }
         }
 
         let base_path = self.api.base_path.trim();
@@ -342,20 +366,35 @@ impl Default for MaintenanceConfig {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct RemoteConfig {
-    /// Reserved for wire-level remote management. **Not supported yet**:
-    /// the daemon refuses to bind a non-loopback address until auth is
-    /// implemented. See `docs/security.md`.
+    /// Serve the API over TLS on `tls_listen_addr` as well, for remote
+    /// management. Requires `tls_cert_file`, `tls_key_file` and a
+    /// `[security] token_file`; every remote request needs a token.
     pub enabled: bool,
+    /// The local (loopback-only) listener. Always served.
     pub listen_addr: String,
+    /// Where the TLS remote listener binds when `enabled`.
+    pub tls_listen_addr: String,
+    /// PEM certificate chain for the remote listener.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tls_cert_file: Option<std::path::PathBuf>,
+    /// PEM private key for the remote listener (keep it root-owned, mode 0600).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tls_key_file: Option<std::path::PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub advertise_hostname: Option<String>,
 }
+
+/// Default bind address of the TLS remote listener.
+pub const DEFAULT_TLS_LISTEN_ADDR: &str = "0.0.0.0:7361";
 
 impl Default for RemoteConfig {
     fn default() -> Self {
         Self {
             enabled: false,
             listen_addr: DEFAULT_LISTEN_ADDR.to_owned(),
+            tls_listen_addr: DEFAULT_TLS_LISTEN_ADDR.to_owned(),
+            tls_cert_file: None,
+            tls_key_file: None,
             advertise_hostname: None,
         }
     }
@@ -625,6 +664,45 @@ max_payload_bytes = 0
         assert!(text.contains("listen_addr"), "got: {text}");
         assert!(text.contains("base_path"), "got: {text}");
         assert!(text.contains("max_payload_bytes"), "got: {text}");
+    }
+
+    #[test]
+    fn remote_management_fails_closed_without_tls_or_tokens() {
+        let mut cfg = Config::default();
+        cfg.remote.enabled = true;
+        let errors = cfg.validate().unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("tls_cert_file and tls_key_file")),
+            "{errors:?}"
+        );
+        assert!(
+            errors.iter().any(|e| e.contains("token_file")),
+            "{errors:?}"
+        );
+
+        cfg.remote.tls_cert_file = Some("/etc/abora/tls/cert.pem".into());
+        cfg.remote.tls_key_file = Some("/etc/abora/tls/key.pem".into());
+        cfg.security.token_file = Some("/etc/abora/auth.toml".into());
+        assert_eq!(cfg.validate(), Ok(()));
+
+        cfg.remote.tls_listen_addr = "not an address".to_owned();
+        assert!(cfg.validate().is_err());
+        cfg.remote.tls_listen_addr = cfg.remote.listen_addr.clone();
+        assert!(cfg
+            .validate()
+            .unwrap_err()
+            .iter()
+            .any(|e| e.contains("must differ")));
+    }
+
+    #[test]
+    fn remote_management_is_off_by_default() {
+        let cfg = Config::default();
+        assert!(!cfg.remote.enabled);
+        assert_eq!(cfg.remote.tls_listen_addr, DEFAULT_TLS_LISTEN_ADDR);
+        assert_eq!(cfg.validate(), Ok(()));
     }
 
     #[test]

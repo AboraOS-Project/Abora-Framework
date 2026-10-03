@@ -41,7 +41,7 @@ sysinfo, API skeleton, read-only daemon, CLI, docs).
 ## Milestone 3 — platform consumers
 
 - [ ] `abora-cloud` / `abora-atlas` crates extending config with `[cloud.*]` / `[atlas.*]`.
-- [ ] Authenticated remote management over a locked-down TLS listener (only after token auth; guards `[remote].enabled`).
+- [x] Authenticated remote management over a locked-down TLS listener: `[remote] enabled` adds a TLS-only listener on `tls_listen_addr` where every request needs a token (no preview mode); refuses to start without cert, key and token file. `abora tls generate` makes a server certificate, `ABORA_CA_FILE` lets the CLI trust it. Verified with `make test-remote` (real binaries, curl and the CLI).
 - [x] Installer packaging: hardened systemd unit (exposure 1.1 OK), `installer/install.sh` (dedicated `aborad` user, never overwrites your config, `--uninstall`/`--purge`), `scripts/check-installer.sh`. Real root install/uninstall verified in a systemd container (`make test-systemd`); no .deb/.rpm yet.
 
 ## Later ideas

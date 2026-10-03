@@ -46,6 +46,8 @@ enum Command {
     Config(ConfigArgs),
     /// Manage daemon bearer tokens (no daemon required).
     Auth(AuthArgs),
+    /// Create TLS material for the remote-management listener (no daemon required).
+    Tls(TlsArgs),
 }
 
 #[derive(Args)]
@@ -120,6 +122,31 @@ enum AuthCommand {
     },
 }
 
+#[derive(Args)]
+struct TlsArgs {
+    #[command(subcommand)]
+    command: TlsCommand,
+}
+
+#[derive(Subcommand)]
+enum TlsCommand {
+    /// Write a self-signed server certificate and key for [remote] (PEM).
+    /// The certificate is a server (end-entity) certificate, which TLS
+    /// clients accept; a CA certificate used as a server certificate is
+    /// rejected by rustls.
+    Generate {
+        /// Host names or IP addresses clients will connect to. Repeatable.
+        #[arg(long = "hostname", value_name = "NAME", required = true)]
+        hostnames: Vec<String>,
+        /// Directory to write cert.pem and key.pem into.
+        #[arg(long, default_value = "/etc/abora/tls")]
+        out_dir: std::path::PathBuf,
+        /// Replace existing files.
+        #[arg(long)]
+        force: bool,
+    },
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
@@ -137,7 +164,88 @@ fn main() -> ExitCode {
                 secret,
             } => cmd_auth_generate_token(name, permissions, secret_bytes, secret),
         },
+        Command::Tls(tls) => match tls.command {
+            TlsCommand::Generate {
+                hostnames,
+                out_dir,
+                force,
+            } => cmd_tls_generate(hostnames, out_dir, force),
+        },
     }
+}
+
+fn cmd_tls_generate(hostnames: Vec<String>, out_dir: std::path::PathBuf, force: bool) -> ExitCode {
+    match tls_generate(&hostnames, &out_dir, force) {
+        Ok((cert, key)) => {
+            println!("wrote {}", cert.display());
+            println!("wrote {} (mode 0600)", key.display());
+            println!();
+            println!("Add this to the daemon's configuration:");
+            println!("  [remote]");
+            println!("  enabled = true");
+            println!("  tls_cert_file = \"{}\"", cert.display());
+            println!("  tls_key_file = \"{}\"", key.display());
+            println!();
+            println!(
+                "Clients trust it by pointing ABORA_CA_FILE at {}.",
+                cert.display()
+            );
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Generate a self-signed end-entity certificate for `hostnames` and write
+/// `cert.pem` and `key.pem` (the key with mode 0600 on Unix).
+fn tls_generate(
+    hostnames: &[String],
+    out_dir: &std::path::Path,
+    force: bool,
+) -> Result<(std::path::PathBuf, std::path::PathBuf), String> {
+    if hostnames.iter().any(|h| h.trim().is_empty()) {
+        return Err("host names must not be empty".to_owned());
+    }
+    let cert_path = out_dir.join("cert.pem");
+    let key_path = out_dir.join("key.pem");
+    if !force && (cert_path.exists() || key_path.exists()) {
+        return Err(format!(
+            "{} or {} already exists; pass --force to replace them",
+            cert_path.display(),
+            key_path.display()
+        ));
+    }
+    let certified = rcgen::generate_simple_self_signed(hostnames.to_vec())
+        .map_err(|e| format!("could not generate a certificate: {e}"))?;
+    std::fs::create_dir_all(out_dir)
+        .map_err(|e| format!("could not create {}: {e}", out_dir.display()))?;
+    std::fs::write(&cert_path, certified.cert.pem())
+        .map_err(|e| format!("could not write {}: {e}", cert_path.display()))?;
+    write_private(&key_path, certified.key_pair.serialize_pem().as_bytes())?;
+    Ok((cert_path, key_path))
+}
+
+#[cfg(unix)]
+fn write_private(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)
+        .map_err(|e| format!("could not write {}: {e}", path.display()))?;
+    file.write_all(bytes)
+        .map_err(|e| format!("could not write {}: {e}", path.display()))
+}
+
+#[cfg(not(unix))]
+fn write_private(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
+    std::fs::write(path, bytes).map_err(|e| format!("could not write {}: {e}", path.display()))
 }
 
 fn cmd_version() -> ExitCode {
@@ -569,10 +677,29 @@ fn get_json(url: &str, token: Option<&str>) -> Result<Value, String> {
 fn call_json(method: &str, url: &str, token: Option<&str>) -> Result<Value, String> {
     // Return non-2xx responses instead of raising so we can read the API
     // error envelope out of the body.
-    let config = ureq::config::Config::builder()
-        .http_status_as_error(false)
-        .build();
-    let agent = ureq::Agent::new_with_config(config);
+    let mut config = ureq::config::Config::builder().http_status_as_error(false);
+    // A remote daemon with a self-signed or private-CA certificate: trust exactly that PEM.
+    if let Ok(ca_file) = std::env::var("ABORA_CA_FILE") {
+        let pem = std::fs::read(&ca_file)
+            .map_err(|e| format!("could not read ABORA_CA_FILE {ca_file}: {e}"))?;
+        let certs: Vec<_> = ureq::tls::parse_pem(&pem)
+            .filter_map(|item| match item {
+                Ok(ureq::tls::PemItem::Certificate(cert)) => Some(cert),
+                _ => None,
+            })
+            .collect();
+        if certs.is_empty() {
+            return Err(format!(
+                "ABORA_CA_FILE {ca_file} contains no PEM certificate"
+            ));
+        }
+        config = config.tls_config(
+            ureq::tls::TlsConfig::builder()
+                .root_certs(ureq::tls::RootCerts::new_with_certs(&certs))
+                .build(),
+        );
+    }
+    let agent = ureq::Agent::new_with_config(config.build());
 
     let bearer = token.map(|t| format!("Bearer {t}"));
     let mut response = if method == "POST" {
