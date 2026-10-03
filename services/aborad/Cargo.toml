@@ -16,6 +16,8 @@ abora-log = { path = "../../crates/abora-log" }
 abora-services = { path = "../../crates/abora-services" }
 abora-sysinfo = { path = "../../crates/abora-sysinfo" }
 axum = { workspace = true }
+axum-server = { workspace = true }
+rustls = { workspace = true }
 http-body-util = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -27,6 +29,8 @@ tower = { workspace = true }
 
 [dev-dependencies]
 tower = { workspace = true }
+rcgen = { workspace = true }
+ureq = { workspace = true }
 
 [lints]
 workspace = true

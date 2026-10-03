@@ -2,8 +2,9 @@
 //!
 //! # Rules (in order)
 //!
-//! 1. **Never allow remote peers.** Remote management is not implemented;
-//!    non-loopback clients are always refused regardless of credentials.
+//! 1. **On the loopback listener, never allow remote peers.** Non-loopback
+//!    clients there are refused regardless of credentials. Remote management
+//!    has its own TLS listener; see [`authorize_remote`].
 //! 2. **No token store configured** (`[security] token_file` unset):
 //!    loopback clients are trusted (preview mode). This is the current
 //!    out-of-the-box posture; the daemon logs a warning about it.
@@ -108,6 +109,29 @@ pub fn authorize(
     }
 }
 
+/// Admission for a request that arrived on the TLS remote-management
+/// listener (`[remote] enabled`). A token is always required: there is no
+/// preview mode, and `[security] require_authentication = false` never
+/// applies here. Pass the loaded store regardless of that setting; without
+/// one, every remote request is refused.
+pub fn authorize_remote(
+    permission: Permission,
+    bearer: Option<&str>,
+    store: Option<&TokenStore>,
+) -> Decision {
+    let Some(store) = store else {
+        return Decision::RemoteNotAllowed;
+    };
+    let Some(bearer) = bearer else {
+        return Decision::AuthenticationRequired;
+    };
+    match store.find(bearer) {
+        None => Decision::AuthenticationRequired,
+        Some(token) if token.grants(permission.permission_id()) => Decision::Allowed,
+        Some(_) => Decision::InsufficientPermission,
+    }
+}
+
 impl Decision {
     /// Convert into an API error body, if the decision was a denial.
     pub fn into_denial(self, permission: Permission) -> Option<ApiErrorBody> {
@@ -116,7 +140,7 @@ impl Decision {
             Decision::RemoteNotAllowed => Some(ApiErrorBody::new(
                 abora_api::ErrorCode::Forbidden,
                 format!(
-                    "operation `{}` is not allowed for remote clients; remote management is not enabled",
+                    "operation `{}` is not allowed for remote clients; use the TLS remote listener with a token ([remote] enabled)",
                     permission.permission_id()
                 ),
             )),
@@ -317,6 +341,32 @@ mod tests {
             authorize(LOOPBACK, Permission::ReadUpdates, Some("secret"), Some(&s)),
             Decision::InsufficientPermission,
             "manage does not imply read"
+        );
+    }
+
+    #[test]
+    fn remote_listener_always_needs_a_token() {
+        let s = store("secret", &["read:health"]);
+        assert_eq!(
+            authorize_remote(Permission::ReadHealth, None, None),
+            Decision::RemoteNotAllowed,
+            "no token store: no preview mode remotely"
+        );
+        assert_eq!(
+            authorize_remote(Permission::ReadHealth, None, Some(&s)),
+            Decision::AuthenticationRequired
+        );
+        assert_eq!(
+            authorize_remote(Permission::ReadHealth, Some("wrong"), Some(&s)),
+            Decision::AuthenticationRequired
+        );
+        assert_eq!(
+            authorize_remote(Permission::ReadHealth, Some("secret"), Some(&s)),
+            Decision::Allowed
+        );
+        assert_eq!(
+            authorize_remote(Permission::ManageUpdates, Some("secret"), Some(&s)),
+            Decision::InsufficientPermission
         );
     }
 

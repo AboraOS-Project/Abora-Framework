@@ -11,11 +11,15 @@ test-apply:
 test-systemd:
 	@scripts/test-systemd-docker.sh
 
+## test-remote   Test the TLS remote listener end to end with the real binaries (curl and the CLI)
+test-remote:
+	@scripts/test-remote.sh
+
 ## test-nix      Test the Nix side: packages, installer input validation, all ANIX/TinyPM combos
 test-nix:
 	@scripts/test-nix-docker.sh
 
-.PHONY: test-nix test-systemd test-apply fork-check all iso run run-headless boot-test screenshot build test clean distclean help
+.PHONY: test-remote test-nix test-systemd test-apply fork-check all iso run run-headless boot-test screenshot build test clean distclean help
 
 all: iso
 

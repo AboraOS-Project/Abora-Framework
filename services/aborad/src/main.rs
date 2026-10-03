@@ -32,6 +32,7 @@ mod auth;
 mod errors;
 mod handlers;
 mod reload;
+mod remote;
 mod scheduler;
 mod server;
 mod state;
@@ -312,14 +313,31 @@ fn run(config_path: Option<PathBuf>) -> Result<(), String> {
     for line in config.summary() {
         info!(logger, "{line}");
     }
-    if config.remote.enabled {
-        warn!(
-            logger,
-            "[remote].enabled is set but remote management is not implemented; ignoring it"
-        );
-    }
+    // The remote TLS listener, bound now so a port clash stops startup.
+    let remote_listener = if config.remote.enabled {
+        let addr: SocketAddr = config.remote.tls_listen_addr.parse().map_err(|_| {
+            format!(
+                "[remote] tls_listen_addr `{}` is not a valid socket address",
+                config.remote.tls_listen_addr
+            )
+        })?;
+        let cert = config.remote.tls_cert_file.clone();
+        let key = config.remote.tls_key_file.clone();
+        match (cert, key) {
+            (Some(cert), Some(key)) => Some((remote::bind(addr)?, addr, cert, key)),
+            _ => return Err("[remote] enabled needs tls_cert_file and tls_key_file".to_owned()),
+        }
+    } else {
+        None
+    };
 
     let tokens = load_token_store(&config, &logger)?;
+    if remote_listener.is_some() && tokens.is_none() {
+        return Err(
+            "[remote] enabled needs [security] token_file: remote requests must carry a token"
+                .to_owned(),
+        );
+    }
 
     // A synchronous, pre-bound listener: errors surface before we log that
     // we are running, and the socket never accepts connections from anyone
@@ -347,6 +365,28 @@ fn run(config_path: Option<PathBuf>) -> Result<(), String> {
 
     runtime.block_on(async {
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+        // One stop switch for every listener.
+        let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
+        tokio::spawn(async move {
+            let _ = shutdown_rx.await;
+            let _ = stop_tx.send(true);
+        });
+        if let Some((listener, addr, cert, key)) = remote_listener {
+            let tls = remote::load_tls(&cert, &key).await?;
+            info!(
+                state.logger,
+                "remote management: listening on {addr} (TLS, tokens required)"
+            );
+            let app = server::build_remote(state.clone());
+            let stop = stop_rx.clone();
+            let logger = state.logger.clone();
+            tokio::spawn(async move {
+                if let Err(e) = remote::serve(listener, tls, app, stop).await {
+                    abora_log::error!(logger, "{e}");
+                }
+            });
+        }
+        let mut stop_local = stop_rx;
         tokio::spawn(signal_and_watch_loop(
             state.clone(),
             reload_source,
@@ -361,8 +401,8 @@ fn run(config_path: Option<PathBuf>) -> Result<(), String> {
             listener,
             app.into_make_service_with_connect_info::<SocketAddr>(),
         )
-        .with_graceful_shutdown(async {
-            let _ = shutdown_rx.await;
+        .with_graceful_shutdown(async move {
+            let _ = stop_local.wait_for(|stopped| *stopped).await;
         })
         .await
         .map_err(|e| format!("server error: {e}"))

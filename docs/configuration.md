@@ -90,16 +90,21 @@ windows = [
 
 Windows are half-open: work may start at `start` and must finish before `end`.
 
-### `[remote]` — remote management (reserved)
+### `[remote]` — local listener and remote management over TLS
 
 | Key                 | Type   | Default            | Meaning                  |
 |---------------------|--------|--------------------|--------------------------|
-| `enabled`           | bool   | `false`             | Reserved; ignored        |
-| `listen_addr`       | string | `127.0.0.1:7360`    | Socket to bind. Loopback only, for now |
+| `enabled`           | bool   | `false`            | Also serve the API over TLS for remote management |
+| `listen_addr`       | string | `127.0.0.1:7360`   | Local listener. Loopback only |
+| `tls_listen_addr`   | string | `0.0.0.0:7361`     | TLS remote listener, used when `enabled` |
+| `tls_cert_file`     | path   | none               | PEM certificate chain (required when `enabled`) |
+| `tls_key_file`      | path   | none               | PEM private key (required when `enabled`; keep it `0600`) |
 | `advertise_hostname`| string | none               | Optional discovery FQDN  |
 
-The daemon **refuses to start** if `listen_addr` is not a loopback address.
-Remote management is not implemented; see [docs/security.md](security.md).
+The daemon **refuses to start** if `listen_addr` is not a loopback address, or
+if `enabled` is set without a certificate, a key and `[security] token_file`.
+Every remote request needs a token. Create a certificate with
+`abora tls generate --hostname <name>`; see [docs/security.md](security.md).
 
 ### `[security]`
 
